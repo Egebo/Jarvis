@@ -197,21 +197,30 @@ class SkillExecutor:
         return f"✅ {action} yapıldı."
 
     # ─── Ekran Görüntüsü ─────────────────────────────────────────────────────
-    async def take_screenshot(self) -> str:
+    async def take_screenshot(self) -> dict:
+        """
+        Ekran görüntüsü alır ve görseli modele iletilecek formatta döndürür.
+        Dönen dict brain.py tarafından Gemini'ye inline görsel olarak eklenir.
+        """
         import pyautogui
         import base64
-        import tempfile
-        import os
+        import io
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp_path = f.name
+        loop = asyncio.get_event_loop()
+        screenshot = await loop.run_in_executor(None, pyautogui.screenshot)
 
-        screenshot = pyautogui.screenshot()
-        screenshot.save(tmp_path)
+        # Token/boyut tasarrufu: genişliği 1280px'e indir, JPEG'e çevir
+        max_width = 1280
+        if screenshot.width > max_width:
+            ratio = max_width / screenshot.width
+            screenshot = screenshot.resize((max_width, int(screenshot.height * ratio)))
 
-        with open(tmp_path, "rb") as f:
-            img_data = base64.b64encode(f.read()).decode()
-        os.unlink(tmp_path)
+        buf = io.BytesIO()
+        screenshot.convert("RGB").save(buf, format="JPEG", quality=80)
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        # Base64 görseli modele gönder (vision)
-        return f"[SCREENSHOT_B64:{img_data[:100]}...]"  # truncated for brevity
+        return {
+            "text": "Ekran görüntüsü alındı, görsel ekte.",
+            "image_b64": img_b64,
+            "mime_type": "image/jpeg",
+        }

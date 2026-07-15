@@ -7,6 +7,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# NOT: GoodbyeDPI açıkken tüm Python HTTPS istekleri aralıklı olarak
+# [SSL: INVALID_SESSION_ID] hatası verir. Jarvis'i kullanmadan önce
+# GoodbyeDPI'ı kapatın veya blacklist moduna alın.
+
 # ─── API Keys ───────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")   # opsiyonel

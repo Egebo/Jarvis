@@ -2,6 +2,8 @@
 Jarvis Brain — Gemini API entegrasyonu
 Konuşma hafızası ve araç çağrıları burada yönetilir.
 """
+import base64
+
 from google import genai
 from google.genai import types
 from backend.config import GEMINI_API_KEY, GEMINI_MODEL, MAX_TOKENS, SYSTEM_PROMPT
@@ -135,7 +137,7 @@ class JarvisBrain:
             tools=self.tools,
         )
 
-        response = self.client.models.generate_content(
+        response = await self.client.aio.models.generate_content(
             model=GEMINI_MODEL,
             contents=self._build_contents(),
             config=config,
@@ -164,17 +166,33 @@ class JarvisBrain:
                 else:
                     result = f"Araç '{tool_name}' çalıştırılamadı."
 
-                function_response_parts.append(
-                    types.Part.from_function_response(
-                        name=tool_name,
-                        response={"result": str(result)}
+                # Görsel içeren sonuç (örn. ekran görüntüsü): fonksiyon yanıtına
+                # ek olarak görseli inline data olarak modele gönder
+                if isinstance(result, dict) and "image_b64" in result:
+                    function_response_parts.append(
+                        types.Part.from_function_response(
+                            name=tool_name,
+                            response={"result": result.get("text", "Görsel ekte.")}
+                        )
                     )
-                )
+                    function_response_parts.append(
+                        types.Part.from_bytes(
+                            data=base64.b64decode(result["image_b64"]),
+                            mime_type=result.get("mime_type", "image/png"),
+                        )
+                    )
+                else:
+                    function_response_parts.append(
+                        types.Part.from_function_response(
+                            name=tool_name,
+                            response={"result": str(result)}
+                        )
+                    )
 
             # Fonksiyon sonuçlarını hafızaya ekle ve devam et
             self.memory.add_raw("user", function_response_parts)
 
-            response = self.client.models.generate_content(
+            response = await self.client.aio.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=self._build_contents(),
                 config=config,
