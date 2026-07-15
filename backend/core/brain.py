@@ -135,6 +135,9 @@ class JarvisBrain:
             system_instruction=SYSTEM_PROMPT,
             max_output_tokens=MAX_TOKENS,
             tools=self.tools,
+            # Sesli asistanda gecikme kritik: modelin cevap öncesi "düşünme"
+            # aşamasını kapat (birkaç saniye kazandırır)
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
 
         response = await self.client.aio.models.generate_content(

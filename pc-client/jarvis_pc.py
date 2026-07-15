@@ -48,7 +48,7 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 
 SILENCE_THRESHOLD = 600    # RMS eşiği — daha düşük = daha hassas
-SILENCE_DURATION = 1.8     # Bu kadar sessizlik → kayıt bitti
+SILENCE_DURATION = 1.2     # Bu kadar sessizlik → kayıt bitti
 MAX_RECORD_SECONDS = 12    # Maksimum kayıt süresi
 
 WAKE_WORD = "jarvis"       # Tetikleyici kelime (basit string match)
