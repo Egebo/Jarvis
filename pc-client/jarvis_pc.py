@@ -219,8 +219,31 @@ class JarvisPCClient:
                 return True
         return False
 
-    def listen_for_wake_word(self) -> bool:
-        """2 saniyelik pencere dinle → tiny Whisper ile 'jarvis' ara."""
+    def _transcribe_tiny(self, pcm: bytes) -> str:
+        """Lokal tiny model ile hızlı transkripsiyon (sadece wake word kontrolü için)."""
+        import tempfile, os
+        model = self._get_wake_model()
+        wav = pcm_to_wav(pcm)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(wav)
+            tmp = f.name
+        try:
+            result = model.transcribe(tmp, language="tr", fp16=False,
+                                      initial_prompt="Jarvis")
+            return result["text"].lower().strip()
+        finally:
+            os.unlink(tmp)
+
+    def wait_for_command(self) -> bytes | None:
+        """
+        Tek nefeste komut akışı:
+        Ses başlayana kadar bekle → konuşmanın TAMAMINI kaydet →
+        'Jarvis' ile başlıyorsa/içeriyorsa tüm kaydı döndür (komut dahil).
+        Böylece 'Jarvis, ekranımda ne var?' tek seferde çalışır;
+        sadece 'Jarvis' denirse de kısa kayıt gider, sunucu 'Buyrun?' der.
+        """
+        import collections
+
         stream = self.pa.open(
             format=FORMAT,
             channels=CHANNELS,
@@ -229,35 +252,49 @@ class JarvisPCClient:
             frames_per_buffer=CHUNK
         )
 
-        frames = []
-        for _ in range(int(SAMPLE_RATE / CHUNK * 2.0)):
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            frames.append(data)
-
-        stream.stop_stream()
-        stream.close()
-
-        # Enerji kontrolü — konuşma var mı?
-        pcm = b"".join(frames)
-        if rms(pcm) < SILENCE_THRESHOLD * 0.5:
-            return False
-
         try:
-            import tempfile, os
-            model = self._get_wake_model()
-            wav = pcm_to_wav(pcm)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                f.write(wav)
-                tmp = f.name
-            result = model.transcribe(tmp, language="tr", fp16=False,
-                                      initial_prompt="Jarvis")
-            os.unlink(tmp)
-            text = result["text"].lower()
-            log.debug(f"Wake word check: '{text}'")
-            return self._matches_wake_word(text)
+            # 1) Ses başlayana kadar bekle (öncesinden 0.5s tampon tut ki
+            #    'Jarvis'in J'si kırpılmasın)
+            preroll = collections.deque(maxlen=int(0.5 * SAMPLE_RATE / CHUNK))
+            waited_chunks = 0
+            max_wait_chunks = int(10 * SAMPLE_RATE / CHUNK)   # 10s sessizlik → döngüye dön
+            while True:
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                preroll.append(data)
+                if rms(data) >= SILENCE_THRESHOLD:
+                    break
+                waited_chunks += 1
+                if waited_chunks > max_wait_chunks:
+                    return None
+
+            # 2) Konuşma bitene kadar kaydet
+            frames = list(preroll)
+            silence_chunks = 0
+            required_silence = int(SILENCE_DURATION * SAMPLE_RATE / CHUNK)
+            max_chunks = int(MAX_RECORD_SECONDS * SAMPLE_RATE / CHUNK)
+            for _ in range(max_chunks):
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                frames.append(data)
+                if rms(data) < SILENCE_THRESHOLD:
+                    silence_chunks += 1
+                    if silence_chunks >= required_silence:
+                        break
+                else:
+                    silence_chunks = 0
+        finally:
+            stream.stop_stream()
+            stream.close()
+
+        # 3) Wake word kontrolü — cümlenin başında/içinde 'jarvis' var mı?
+        pcm = b"".join(frames)
+        try:
+            text = self._transcribe_tiny(pcm)
+            log.debug(f"Duyulan: '{text}'")
+            if self._matches_wake_word(text):
+                return pcm
         except Exception as e:
             log.debug(f"Wake word STT hatası: {e}")
-            return False
+        return None
 
     # ── Ana Döngü ────────────────────────────────────────────────────────────
     async def run(self):
@@ -271,38 +308,36 @@ class JarvisPCClient:
         # Klavye girişi için ayrı thread
         asyncio.create_task(self._keyboard_input())
 
-        # Sürekli wake word dinle
+        # Sürekli dinle: 'Jarvis ...' ile başlayan konuşmayı tek seferde yakala
         while True:
             if self.state == "idle":
-                detected = await asyncio.get_event_loop().run_in_executor(
-                    None, self.listen_for_wake_word
+                pcm = await asyncio.get_event_loop().run_in_executor(
+                    None, self.wait_for_command
                 )
-                if detected:
-                    await self._handle_voice_activation()
+                if pcm:
+                    print("⚡ Jarvis algılandı, komut gönderiliyor...")
+                    self._beep()
+                    await self._send_audio(pcm)
             else:
                 await asyncio.sleep(0.1)
 
-    async def _handle_voice_activation(self):
-        """Wake word algılandı — kayıt yap ve gönder."""
-        print("⚡ Wake word algılandı!")
-
-        # Kısa bip sesi (opsiyonel)
-        self._beep()
-
-        # Konuşmayı kaydet
-        pcm = await asyncio.get_event_loop().run_in_executor(
-            None, self.record_until_silence
-        )
-
-        # WAV'a çevir ve gönder
+    async def _send_audio(self, pcm: bytes):
+        """Ham PCM kaydı WAV olarak sunucuya gönder."""
         wav_bytes = pcm_to_wav(pcm)
         audio_b64 = base64.b64encode(wav_bytes).decode()
-
         if self.ws:
             await self.ws.send(json.dumps({
                 "type": "audio",
                 "data": audio_b64
             }))
+
+    async def _handle_voice_activation(self):
+        """Enter'a basıldı — wake word beklemeden kaydet ve gönder."""
+        self._beep()
+        pcm = await asyncio.get_event_loop().run_in_executor(
+            None, self.record_until_silence
+        )
+        await self._send_audio(pcm)
 
     async def _keyboard_input(self):
         """Enter'a basınca manuel aktivasyon."""
