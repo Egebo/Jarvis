@@ -34,7 +34,16 @@ Temel kurallar:
 """
 
 # ─── TTS Ayarları ───────────────────────────────────────────────────────────
-TTS_ENGINE = os.getenv("TTS_ENGINE", "pyttsx3")        # "pyttsx3" veya "elevenlabs"
+TTS_ENGINE = os.getenv("TTS_ENGINE", "gemini")         # "gemini", "edge", "pyttsx3", "elevenlabs"
+GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Charon")  # Puck, Charon, Kore, Fenrir, Orus...
+GEMINI_TTS_STYLE = os.getenv(
+    "GEMINI_TTS_STYLE",
+    "Aşağıdaki metni Iron Man'deki JARVIS gibi sakin, kendinden emin, "
+    "hafif esprili bir yapay zeka uşağı tonuyla, doğal Türkçe tonlamayla, "
+    "akıcı ve hafif hızlı bir tempoyla oku"
+)
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "tr-TR-AhmetNeural")  # ücretsiz nöral Türkçe ses
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam voice
 TTS_RATE = int(os.getenv("TTS_RATE", "175"))           # Konuşma hızı (pyttsx3)
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "0.9"))

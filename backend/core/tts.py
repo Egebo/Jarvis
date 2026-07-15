@@ -1,11 +1,20 @@
 """
 Text-to-Speech — Metni sese çevirir
-Desteklenen motorlar: pyttsx3 (ücretsiz, offline) veya ElevenLabs (kaliteli, online)
+Desteklenen motorlar:
+  - gemini    : Gemini TTS (Gemini API anahtarıyla, doğal tonlama, stil yönlendirilebilir) — varsayılan
+  - edge      : Microsoft Edge TTS (ücretsiz, online, nöral sesler)
+  - pyttsx3   : offline yedek (robotik SAPI sesi)
+  - elevenlabs: yüksek kalite, ayrı API anahtarı gerekir
+Hata durumunda sırayla bir alttaki motora düşülür: gemini → edge → pyttsx3
 """
-import io
 import asyncio
+import io
+import subprocess
 import threading
-from backend.config import (TTS_ENGINE, TTS_RATE, TTS_VOLUME,
+import wave
+from backend.config import (TTS_ENGINE, TTS_RATE, TTS_VOLUME, EDGE_TTS_VOICE,
+                              GEMINI_API_KEY, GEMINI_TTS_MODEL, GEMINI_TTS_VOICE,
+                              GEMINI_TTS_STYLE,
                               ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID)
 
 
@@ -13,6 +22,7 @@ class TextToSpeech:
     def __init__(self):
         self.engine_name = TTS_ENGINE
         self._pyttsx3_engine = None
+        self._gemini_client = None
         self._lock = threading.Lock()
 
     def _get_pyttsx3(self):
@@ -32,12 +42,81 @@ class TextToSpeech:
 
     async def synthesize(self, text: str) -> bytes:
         """
-        Metni ses verisine çevirir (MP3 bytes döndürür).
+        Metni ses verisine çevirir (WAV bytes döndürür).
         """
         if self.engine_name == "elevenlabs" and ELEVENLABS_API_KEY:
             return await self._elevenlabs(text)
-        else:
-            return await self._pyttsx3(text)
+        if self.engine_name == "gemini":
+            try:
+                return await self._gemini(text)
+            except Exception as e:
+                print(f"⚠️ Gemini TTS hatası ({e}), Edge TTS'e düşülüyor")
+        if self.engine_name in ("gemini", "edge"):
+            try:
+                return await self._edge(text)
+            except Exception as e:
+                print(f"⚠️ Edge TTS hatası ({e}), pyttsx3'e düşülüyor")
+        return await self._pyttsx3(text)
+
+    async def _gemini(self, text: str) -> bytes:
+        """Gemini TTS — stil yönlendirmeli, doğal tonlamalı ses (WAV döndürür)."""
+        from google import genai
+        from google.genai import types
+
+        if self._gemini_client is None:
+            self._gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+
+        response = await self._gemini_client.aio.models.generate_content(
+            model=GEMINI_TTS_MODEL,
+            contents=f"{GEMINI_TTS_STYLE}: {text}",
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=GEMINI_TTS_VOICE
+                        )
+                    )
+                ),
+            ),
+        )
+
+        # Ham PCM (16-bit, 24kHz, mono) döner — WAV kabına sar
+        pcm = response.candidates[0].content.parts[0].inline_data.data
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(pcm)
+        return buf.getvalue()
+
+    async def _edge(self, text: str) -> bytes:
+        """Edge TTS ile nöral Türkçe ses üretir (MP3 → WAV çevrilir)."""
+        import edge_tts
+
+        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+        mp3_data = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                mp3_data += chunk["data"]
+
+        if not mp3_data:
+            raise RuntimeError("Edge TTS boş ses döndürdü")
+
+        # PC client'ın SoundPlayer'ı yalnızca WAV çalabiliyor → ffmpeg ile çevir
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._mp3_to_wav, mp3_data)
+
+    @staticmethod
+    def _mp3_to_wav(mp3_data: bytes) -> bytes:
+        proc = subprocess.run(
+            ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", "24000", "-ac", "1", "pipe:1"],
+            input=mp3_data, capture_output=True
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg dönüşüm hatası: {proc.stderr[-200:].decode(errors='ignore')}")
+        return proc.stdout
 
     async def speak(self, text: str):
         """

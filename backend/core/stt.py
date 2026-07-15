@@ -16,13 +16,16 @@ class SpeechToText:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._model = None
+            cls._instance._device = "cpu"
         return cls._instance
 
     def load(self):
-        """Modeli yükle (ilk çağrıda otomatik indirir)."""
+        """Modeli yükle (ilk çağrıda otomatik indirir). GPU varsa GPU kullanır."""
         if self._model is None:
-            print(f"🎙️  Whisper modeli yükleniyor: {WHISPER_MODEL}")
-            self._model = whisper.load_model(WHISPER_MODEL)
+            import torch
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"🎙️  Whisper modeli yükleniyor: {WHISPER_MODEL} ({self._device})")
+            self._model = whisper.load_model(WHISPER_MODEL, device=self._device)
             print("✅ Whisper hazır!")
 
     async def transcribe_bytes(self, audio_bytes: bytes) -> str:
@@ -41,8 +44,10 @@ class SpeechToText:
             result = self._model.transcribe(
                 tmp_path,
                 language=STT_LANGUAGE,
-                fp16=False,
-                condition_on_previous_text=False
+                fp16=(self._device == "cuda"),
+                condition_on_previous_text=False,
+                # "Jarvis" gibi özel isimleri doğru yazması için modeli yönlendir
+                initial_prompt="Jarvis adlı sesli asistanla Türkçe konuşma."
             )
             text = result["text"].strip()
             return text
@@ -54,7 +59,8 @@ class SpeechToText:
         result = self._model.transcribe(
             file_path,
             language=STT_LANGUAGE,
-            fp16=False
+            fp16=(self._device == "cuda"),
+            initial_prompt="Jarvis adlı sesli asistanla Türkçe konuşma."
         )
         return result["text"].strip()
 

@@ -193,11 +193,34 @@ class JarvisPCClient:
 
         return b"".join(frames)
 
+    _wake_model = None
+
+    def _get_wake_model(self):
+        """Wake word için tiny Whisper modelini BİR KEZ yükle (her turda değil)."""
+        if JarvisPCClient._wake_model is None:
+            import whisper
+            log.info("🎙️  Wake word modeli yükleniyor (tiny)...")
+            JarvisPCClient._wake_model = whisper.load_model("tiny")
+            log.info("✅ Wake word modeli hazır")
+        return JarvisPCClient._wake_model
+
+    @staticmethod
+    def _matches_wake_word(text: str) -> bool:
+        """
+        Whisper 'Jarvis'i Türkçe modunda türlü şekillerde yazabiliyor
+        (carvis, çarvış, jarvıs...). Birebir eşleşme yerine bulanık eşleşme yap.
+        """
+        from difflib import SequenceMatcher
+        text = text.lower().replace("ı", "i").replace("ş", "s").replace("ç", "c")
+        if WAKE_WORD in text:
+            return True
+        for word in text.replace(",", " ").replace(".", " ").split():
+            if SequenceMatcher(None, word, WAKE_WORD).ratio() >= 0.65:
+                return True
+        return False
+
     def listen_for_wake_word(self) -> bool:
-        """
-        Kısa ses kayıt → Basit enerji + kelime algılama.
-        Gerçek wake word için pvporcupine kullanılabilir.
-        """
+        """2 saniyelik pencere dinle → tiny Whisper ile 'jarvis' ara."""
         stream = self.pa.open(
             format=FORMAT,
             channels=CHANNELS,
@@ -206,9 +229,8 @@ class JarvisPCClient:
             frames_per_buffer=CHUNK
         )
 
-        # 1 saniyelik segment dinle
         frames = []
-        for _ in range(int(SAMPLE_RATE / CHUNK * 1.0)):
+        for _ in range(int(SAMPLE_RATE / CHUNK * 2.0)):
             data = stream.read(CHUNK, exception_on_overflow=False)
             frames.append(data)
 
@@ -220,19 +242,19 @@ class JarvisPCClient:
         if rms(pcm) < SILENCE_THRESHOLD * 0.5:
             return False
 
-        # Whisper ile hızlı STT (küçük model)
         try:
-            import whisper, tempfile, os
-            model = whisper.load_model("tiny")
+            import tempfile, os
+            model = self._get_wake_model()
             wav = pcm_to_wav(pcm)
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(wav)
                 tmp = f.name
-            result = model.transcribe(tmp, language="tr", fp16=False)
+            result = model.transcribe(tmp, language="tr", fp16=False,
+                                      initial_prompt="Jarvis")
             os.unlink(tmp)
             text = result["text"].lower()
             log.debug(f"Wake word check: '{text}'")
-            return WAKE_WORD in text
+            return self._matches_wake_word(text)
         except Exception as e:
             log.debug(f"Wake word STT hatası: {e}")
             return False
