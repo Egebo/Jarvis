@@ -52,6 +52,7 @@ SILENCE_DURATION = 1.2     # Bu kadar sessizlik → kayıt bitti
 MAX_RECORD_SECONDS = 12    # Maksimum kayıt süresi
 
 WAKE_WORD = "jarvis"       # Tetikleyici kelime (basit string match)
+FOLLOWUP_WINDOW = 8.0      # Yanıttan sonra bu süre içinde wake word GEREKMEZ
 
 
 # ─── Ses Yardımcıları ────────────────────────────────────────────────────────
@@ -101,6 +102,23 @@ class JarvisPCClient:
         self.is_active = False      # Wake word sonrası aktif mi?
         self.state = "idle"         # idle | listening | thinking | speaking
         self._recv_task = None
+        self.followup_until = 0.0   # Bu zamana kadar wake word'süz dinle
+        self._playing = False       # Hoparlörden yanıt çalınıyor mu?
+        import queue
+        self._audio_queue = queue.Queue()
+        threading.Thread(target=self._audio_player_loop, daemon=True).start()
+
+    def _audio_player_loop(self):
+        """Ses parçalarını sırayla çal (cümle cümle gelirler, üst üste binmesinler)."""
+        while True:
+            audio = self._audio_queue.get()
+            self._playing = True
+            play_audio_bytes(audio)
+            if self._audio_queue.empty():
+                self._playing = False
+                # Yanıt bitti → takip penceresi: kısa süre wake word'süz dinle
+                self.followup_until = time.time() + FOLLOWUP_WINDOW
+                print(f"🎧 Dinlemedeyim ({FOLLOWUP_WINDOW:.0f}sn 'Jarvis' demeden konuşabilirsin)")
 
     # ── Bağlantı ─────────────────────────────────────────────────────────────
     async def connect(self):
@@ -144,8 +162,8 @@ class JarvisPCClient:
 
         elif mtype == "audio":
             audio_bytes = base64.b64decode(msg["data"])
-            # Ayrı thread'de çal (async'i bloklamasın)
-            threading.Thread(target=play_audio_bytes, args=(audio_bytes,), daemon=True).start()
+            # Kuyruğa ekle — çalma thread'i sırayla çalar
+            self._audio_queue.put(audio_bytes)
 
         elif mtype == "error":
             log.error(f"Sunucu hatası: {msg['data']}")
@@ -234,13 +252,13 @@ class JarvisPCClient:
         finally:
             os.unlink(tmp)
 
-    def wait_for_command(self) -> bytes | None:
+    def wait_for_command(self, followup: bool = False) -> bytes | None:
         """
         Tek nefeste komut akışı:
         Ses başlayana kadar bekle → konuşmanın TAMAMINI kaydet →
         'Jarvis' ile başlıyorsa/içeriyorsa tüm kaydı döndür (komut dahil).
-        Böylece 'Jarvis, ekranımda ne var?' tek seferde çalışır;
-        sadece 'Jarvis' denirse de kısa kayıt gider, sunucu 'Buyrun?' der.
+        followup=True ise (yanıttan hemen sonraki pencere) wake word ARANMAZ —
+        duyulan her anlamlı konuşma doğrudan gönderilir.
         """
         import collections
 
@@ -257,7 +275,11 @@ class JarvisPCClient:
             #    'Jarvis'in J'si kırpılmasın)
             preroll = collections.deque(maxlen=int(0.5 * SAMPLE_RATE / CHUNK))
             waited_chunks = 0
-            max_wait_chunks = int(10 * SAMPLE_RATE / CHUNK)   # 10s sessizlik → döngüye dön
+            # Takip modunda pencere bitince çık; normalde 10s'de bir döngüye dön
+            if followup:
+                max_wait_chunks = int(max(0.5, self.followup_until - time.time()) * SAMPLE_RATE / CHUNK)
+            else:
+                max_wait_chunks = int(10 * SAMPLE_RATE / CHUNK)
             while True:
                 data = stream.read(CHUNK, exception_on_overflow=False)
                 preroll.append(data)
@@ -285,11 +307,13 @@ class JarvisPCClient:
             stream.stop_stream()
             stream.close()
 
-        # 3) Wake word kontrolü — cümlenin başında/içinde 'jarvis' var mı?
+        # 3) Wake word / içerik kontrolü
         pcm = b"".join(frames)
         try:
             text = self._transcribe_tiny(pcm)
             log.debug(f"Duyulan: '{text}'")
+            if followup and len(text) > 1:
+                return pcm          # takip penceresi: wake word gerekmez
             if self._matches_wake_word(text):
                 return pcm
         except Exception as e:
@@ -308,14 +332,16 @@ class JarvisPCClient:
         # Klavye girişi için ayrı thread
         asyncio.create_task(self._keyboard_input())
 
-        # Sürekli dinle: 'Jarvis ...' ile başlayan konuşmayı tek seferde yakala
+        # Sürekli dinle: 'Jarvis ...' ile başlayan konuşmayı tek seferde yakala.
+        # Yanıttan sonraki kısa pencerede wake word gerekmez (takip sorusu).
         while True:
-            if self.state == "idle":
+            if self.state == "idle" and not self._playing:
+                followup = time.time() < self.followup_until
                 pcm = await asyncio.get_event_loop().run_in_executor(
-                    None, self.wait_for_command
+                    None, self.wait_for_command, followup
                 )
                 if pcm:
-                    print("⚡ Jarvis algılandı, komut gönderiliyor...")
+                    print("⚡ Komut algılandı, gönderiliyor...")
                     self._beep()
                     await self._send_audio(pcm)
             else:

@@ -23,6 +23,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -182,10 +183,15 @@ async def _process_message(
         await manager.send(client_id, {"type": "response", "data": response})
         await manager.send(client_id, {"type": "status", "data": "speaking"})
 
-        # Sese çevir
-        audio_bytes = await tts.synthesize(response)
-        audio_b64 = base64.b64encode(audio_bytes).decode()
-        await manager.send(client_id, {"type": "audio", "data": audio_b64})
+        # Cümle cümle seslendir: ilk cümle hazır olur olmaz çalmaya başlar,
+        # kalanlar o çalarken sentezlenir (bekleme hissini azaltır)
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", response) if s.strip()]
+        if not sentences:
+            sentences = [response]
+        for sentence in sentences:
+            audio_bytes = await tts.synthesize(sentence)
+            audio_b64 = base64.b64encode(audio_bytes).decode()
+            await manager.send(client_id, {"type": "audio", "data": audio_b64})
 
     except Exception as e:
         log.error(f"İşleme hatası: {e}", exc_info=True)

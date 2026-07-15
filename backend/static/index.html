@@ -309,15 +309,32 @@
     return new Blob([byteNumbers], { type: mime });
   }
 
+  // Ses parçaları cümle cümle gelir — kuyruğa alıp sırayla çal
+  var audioQueue = [];
+  var audioPlaying = false;
+
   function playAudioBase64(base64) {
+    audioQueue.push(base64);
+    if (!audioPlaying) playNextAudio();
+  }
+
+  function playNextAudio() {
+    if (audioQueue.length === 0) { audioPlaying = false; return; }
+    audioPlaying = true;
+    var base64 = audioQueue.shift();
     try {
       var blob = base64ToBlob(base64, 'audio/wav');
       var url = URL.createObjectURL(blob);
       var audio = new Audio(url);
-      audio.play().catch(function (err) { console.warn('Otomatik ses oynatma engellendi:', err); });
-      audio.onended = function () { URL.revokeObjectURL(url); };
+      audio.onended = function () { URL.revokeObjectURL(url); playNextAudio(); };
+      audio.onerror = function () { URL.revokeObjectURL(url); playNextAudio(); };
+      audio.play().catch(function (err) {
+        console.warn('Otomatik ses oynatma engellendi:', err);
+        audioPlaying = false;
+      });
     } catch (e) {
       console.error('Ses çalma hatası:', e);
+      playNextAudio();
     }
   }
 
