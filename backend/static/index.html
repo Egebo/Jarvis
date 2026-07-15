@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>J.A.R.V.I.S</title>
+<style>
+  :root {
+    --idle: #00BFFF;
+    --connecting: #FFD700;
+    --listening: #00FF7F;
+    --transcribing: #00BFFF;
+    --thinking: #FF6B6B;
+    --speaking: #9B59B6;
+    --error: #FF4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #050A18;
+    font-family: 'Courier New', Consolas, monospace;
+    color: #E0F0FF;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+    border-left: 1px solid #00BFFF20;
+    border-right: 1px solid #00BFFF20;
+  }
+  header {
+    text-align: center;
+    padding: 28px 20px 16px;
+    border-bottom: 1px solid #00BFFF30;
+    flex-shrink: 0;
+  }
+  h1 {
+    font-size: 28px;
+    letter-spacing: 8px;
+    color: var(--idle);
+    margin: 0;
+    font-weight: 900;
+    transition: color 0.3s;
+  }
+  .subtitle {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: #00BFFF60;
+    margin-top: 4px;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--idle);
+    transition: background 0.3s;
+  }
+  .status-text {
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--idle);
+    transition: color 0.3s;
+  }
+  #warning {
+    display: none;
+    font-size: 11px;
+    color: #FFD700;
+    background: #2a2200;
+    border-bottom: 1px solid #FFD70040;
+    padding: 8px 16px;
+    text-align: center;
+  }
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .empty-hint {
+    color: #00BFFF40;
+    text-align: center;
+    font-size: 14px;
+    margin-top: 40px;
+    font-style: italic;
+  }
+  .bubble {
+    border-radius: 8px;
+    padding: 12px 14px;
+    max-width: 85%;
+    border: 1px solid;
+    animation: fadeIn 0.25s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .bubble.user { align-self: flex-end; background: #001830; border-color: #00BFFF40; }
+  .bubble.jarvis { align-self: flex-start; background: #0D0D2B; border-color: #9B59B640; }
+  .bubble-label {
+    font-size: 9px; letter-spacing: 2px; color: #FFFFFF40; margin-bottom: 6px;
+  }
+  .bubble-text {
+    font-size: 14px; line-height: 1.5; color: #E0F0FF;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  form#text-form {
+    display: flex; gap: 8px; padding: 0 16px 10px; flex-shrink: 0;
+  }
+  #text-input {
+    flex: 1; background: #001020; border: 1px solid #00BFFF30; color: #E0F0FF;
+    padding: 10px 12px; border-radius: 6px; font-family: inherit; font-size: 13px;
+  }
+  #text-input:focus { outline: none; border-color: var(--idle); }
+  #send-btn {
+    background: transparent; border: 1px solid #00BFFF40; color: var(--idle);
+    padding: 0 16px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px;
+  }
+  #send-btn:hover { background: #00BFFF15; }
+  .controls {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 14px 0 30px; flex-shrink: 0;
+  }
+  #mic-btn {
+    width: 88px; height: 88px; border-radius: 50%;
+    border: 2px solid var(--idle); background: #00BFFF10;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px; cursor: pointer; user-select: none;
+    transition: border-color 0.3s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #mic-btn.recording { animation: pulse 1s infinite; }
+  #mic-btn.disabled { opacity: 0.35; cursor: not-allowed; }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.12); }
+  }
+  #mic-hint { font-size: 10px; letter-spacing: 2px; color: #FFFFFF30; }
+  #reset-btn {
+    background: transparent; border: 1px solid #FFFFFF20; color: #FFFFFF50;
+    padding: 6px 18px; border-radius: 4px; font-size: 11px; letter-spacing: 1px;
+    cursor: pointer; font-family: inherit;
+  }
+  #reset-btn:hover { border-color: #FFFFFF40; color: #FFFFFF80; }
+  #chat::-webkit-scrollbar { width: 4px; }
+  #chat::-webkit-scrollbar-thumb { background: #00BFFF30; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1 id="title">J.A.R.V.I.S</h1>
+    <div class="subtitle">JUST A RATHER VERY INTELLIGENT SYSTEM</div>
+    <div class="status-row">
+      <div class="status-dot" id="status-dot"></div>
+      <div class="status-text" id="status-text">BAĞLANIYOR</div>
+    </div>
+  </header>
+
+  <div id="warning"></div>
+
+  <div id="chat">
+    <div class="empty-hint" id="empty-hint">Merhaba Egemen. Nasıl yardımcı olabilirim?</div>
+  </div>
+
+  <form id="text-form">
+    <input type="text" id="text-input" placeholder="Mesaj yazın..." autocomplete="off" />
+    <button type="submit" id="send-btn">Gönder</button>
+  </form>
+
+  <div class="controls">
+    <div id="mic-btn" title="Basılı tutup konuşun">🎙</div>
+    <div id="mic-hint">BASILI TUTUN</div>
+    <button id="reset-btn" type="button">↺ SIFIRLA</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATE_LABELS = {
+    idle: '😴 Bekliyor', connecting: '🔌 Bağlanıyor', listening: '👂 Dinliyor',
+    transcribing: '👂 Anlıyor', thinking: '🧠 Düşünüyor', speaking: '🔊 Konuşuyor',
+    error: '⚠️ Hata', reset: '😴 Bekliyor'
+  };
+  var STATE_COLORS = {
+    idle: '#00BFFF', connecting: '#FFD700', listening: '#00FF7F',
+    transcribing: '#00BFFF', thinking: '#FF6B6B', speaking: '#9B59B6',
+    error: '#FF4444', reset: '#00BFFF'
+  };
+
+  var chatEl = document.getElementById('chat');
+  var emptyHint = document.getElementById('empty-hint');
+  var statusDot = document.getElementById('status-dot');
+  var statusText = document.getElementById('status-text');
+  var titleEl = document.getElementById('title');
+  var micBtn = document.getElementById('mic-btn');
+  var micHint = document.getElementById('mic-hint');
+  var textForm = document.getElementById('text-form');
+  var textInput = document.getElementById('text-input');
+  var resetBtn = document.getElementById('reset-btn');
+  var warningEl = document.getElementById('warning');
+
+  var state = 'connecting';
+  var ws = null;
+  var recording = false;
+  var micAllowed = true;
+  var audioCtx = null, source = null, processor = null, micStream = null;
+  var pcmChunks = [];
+
+  var clientId = 'web-' + Math.random().toString(36).substring(2, 11);
+
+  // Mikrofon sadece güvenli bağlamda (https veya localhost) çalışır.
+  if (window.isSecureContext === false) {
+    micAllowed = false;
+    micBtn.classList.add('disabled');
+    micHint.textContent = 'MİKROFON KAPALI (HTTPS/localhost gerekli)';
+    warningEl.style.display = 'block';
+    warningEl.textContent = '⚠️ Mikrofon için bu sayfayı http://localhost:8765 üzerinden açın. Metin ile sohbet etmeye devam edebilirsiniz.';
+  }
+
+  function setState(s) {
+    state = s;
+    var color = STATE_COLORS[s] || STATE_COLORS.idle;
+    statusDot.style.background = color;
+    statusText.style.color = color;
+    statusText.textContent = (STATE_LABELS[s] || s).toUpperCase();
+    titleEl.style.color = color;
+    if (micAllowed) micBtn.style.borderColor = color;
+  }
+
+  function addBubble(role, text) {
+    emptyHint.style.display = 'none';
+    var div = document.createElement('div');
+    div.className = 'bubble ' + (role === 'user' ? 'user' : 'jarvis');
+    var label = document.createElement('div');
+    label.className = 'bubble-label';
+    label.textContent = role === 'user' ? 'SİZ' : 'JARVIS';
+    var body = document.createElement('div');
+    body.className = 'bubble-text';
+    body.textContent = text;
+    div.appendChild(label);
+    div.appendChild(body);
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  // ─── WebSocket ─────────────────────────────────────────────
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var url = proto + '//' + location.host + '/ws/' + clientId;
+    setState('connecting');
+    ws = new WebSocket(url);
+
+    ws.onopen = function () {
+      console.log('Jarvis bağlantısı kuruldu:', url);
+      setState('idle');
+    };
+
+    ws.onmessage = function (event) {
+      var msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+
+      if (msg.type === 'status') {
+        setState(msg.data);
+      } else if (msg.type === 'transcript') {
+        addBubble('user', msg.data);
+      } else if (msg.type === 'response') {
+        addBubble('jarvis', msg.data);
+      } else if (msg.type === 'audio') {
+        playAudioBase64(msg.data);
+      } else if (msg.type === 'error') {
+        console.error('Sunucu hatası:', msg.data);
+        addBubble('jarvis', '⚠️ Hata: ' + msg.data);
+      }
+    };
+
+    ws.onerror = function (e) {
+      console.error('WebSocket hatası', e);
+      setState('error');
+    };
+
+    ws.onclose = function () {
+      setState('connecting');
+      setTimeout(connect, 3000);
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    } else {
+      console.warn('WebSocket bağlı değil, mesaj gönderilemedi');
+    }
+  }
+
+  // ─── Sunucudan gelen sesi çal (WAV, pyttsx3 varsayılan) ────
+  function base64ToBlob(base64, mime) {
+    var byteChars = atob(base64);
+    var byteNumbers = new Uint8Array(byteChars.length);
+    for (var i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    return new Blob([byteNumbers], { type: mime });
+  }
+
+  function playAudioBase64(base64) {
+    try {
+      var blob = base64ToBlob(base64, 'audio/wav');
+      var url = URL.createObjectURL(blob);
+      var audio = new Audio(url);
+      audio.play().catch(function (err) { console.warn('Otomatik ses oynatma engellendi:', err); });
+      audio.onended = function () { URL.revokeObjectURL(url); };
+    } catch (e) {
+      console.error('Ses çalma hatası:', e);
+    }
+  }
+
+  // ─── Mikrofon kaydı: push-to-talk, ham PCM 16bit/16kHz ─────
+  // Not: backend/core/stt.py "transcribe_bytes" ham PCM (header'sız)
+  // bekliyor ve kendi WAV başlığını ekliyor — bu yüzden burada
+  // MediaRecorder (webm/opus) değil, Web Audio API ile ham örnekler
+  // yakalanıp 16kHz'e indirgeniyor.
+  function floatTo16BitPCM(float32Array) {
+    var buffer = new ArrayBuffer(float32Array.length * 2);
+    var view = new DataView(buffer);
+    for (var i = 0, off = 0; i < float32Array.length; i++, off += 2) {
+      var s = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return buffer;
+  }
+
+  function downsample(buffer, inRate, outRate) {
+    if (outRate === inRate) return buffer;
+    var ratio = inRate / outRate;
+    var newLen = Math.round(buffer.length / ratio);
+    var result = new Float32Array(newLen);
+    var offsetResult = 0, offsetBuffer = 0;
+    while (offsetResult < newLen) {
+      var nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+      var accum = 0, count = 0;
+      for (var i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
+      }
+      result[offsetResult] = count ? accum / count : 0;
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
+  }
+
+  function arrayBufferToBase64(buffer) {
+    var binary = '';
+    var bytes = new Uint8Array(buffer);
+    var chunkSize = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function startRecording() {
+    if (!micAllowed || recording) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Bu tarayıcı mikrofon erişimini desteklemiyor.');
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      micStream = stream;
+      recording = true;
+      micBtn.classList.add('recording');
+      micHint.textContent = 'BIRAKIN';
+      setState('listening');
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      source = audioCtx.createMediaStreamSource(micStream);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      pcmChunks = [];
+
+      processor.onaudioprocess = function (e) {
+        pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      };
+
+      var silentGain = audioCtx.createGain();
+      silentGain.gain.value = 0;
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(audioCtx.destination);
+    }).catch(function (e) {
+      alert('Mikrofon izni verilmedi: ' + e.message);
+    });
+  }
+
+  function stopRecording() {
+    if (!recording) return;
+    recording = false;
+    micBtn.classList.remove('recording');
+    micHint.textContent = 'BASILI TUTUN';
+
+    if (processor) { processor.disconnect(); }
+    if (source) { source.disconnect(); }
+    if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); }
+
+    var inRate = audioCtx ? audioCtx.sampleRate : 44100;
+    if (audioCtx) { audioCtx.close(); }
+
+    var totalLen = 0;
+    pcmChunks.forEach(function (c) { totalLen += c.length; });
+    var merged = new Float32Array(totalLen);
+    var off = 0;
+    pcmChunks.forEach(function (c) { merged.set(c, off); off += c.length; });
+    pcmChunks = [];
+
+    if (totalLen === 0) { setState('idle'); return; }
+
+    var downsampled = downsample(merged, inRate, 16000);
+    var pcm16 = floatTo16BitPCM(downsampled);
+    var base64 = arrayBufferToBase64(pcm16);
+
+    send({ type: 'audio', data: base64 });
+  }
+
+  micBtn.addEventListener('mousedown', startRecording);
+  micBtn.addEventListener('mouseup', stopRecording);
+  micBtn.addEventListener('mouseleave', function () { if (recording) stopRecording(); });
+  micBtn.addEventListener('touchstart', function (e) { e.preventDefault(); startRecording(); });
+  micBtn.addEventListener('touchend', function (e) { e.preventDefault(); stopRecording(); });
+
+  // ─── Metin girişi ───────────────────────────────────────────
+  textForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var text = textInput.value.trim();
+    if (!text) return;
+    addBubble('user', text);
+    send({ type: 'text', data: text });
+    textInput.value = '';
+  });
+
+  // ─── Sıfırla ────────────────────────────────────────────────
+  resetBtn.addEventListener('click', function () {
+    send({ type: 'reset', data: '' });
+    var bubbles = chatEl.querySelectorAll('.bubble');
+    bubbles.forEach(function (b) { b.remove(); });
+    emptyHint.style.display = 'block';
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>

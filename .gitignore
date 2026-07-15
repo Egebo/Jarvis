@@ -1,0 +1,19 @@
+# Gizli anahtarlar
+.env
+
+# Python
+venv/
+scripts/venv/
+__pycache__/
+*.pyc
+
+# Node / React Native
+mobile/node_modules/
+mobile/android/app/build/
+mobile/ios/build/
+mobile/ios/Pods/
+
+# Geçici / OS
+*.log
+.DS_Store
+Thumbs.db
