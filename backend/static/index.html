@@ -309,7 +309,7 @@
     return new Blob([byteNumbers], { type: mime });
   }
 
-  // Ses parçaları cümle cümle gelir — kuyruğa alıp sırayla çal
+  // Ses parçaları cümle cümle gelir; kuyruğa alıp sırayla çal
   var audioQueue = [];
   var audioPlaying = false;
 
@@ -340,7 +340,7 @@
 
   // ─── Mikrofon kaydı: push-to-talk, ham PCM 16bit/16kHz ─────
   // Not: backend/core/stt.py "transcribe_bytes" ham PCM (header'sız)
-  // bekliyor ve kendi WAV başlığını ekliyor — bu yüzden burada
+  // bekliyor ve kendi WAV başlığını ekliyor; bu yüzden burada
   // MediaRecorder (webm/opus) değil, Web Audio API ile ham örnekler
   // yakalanıp 16kHz'e indirgeniyor.
   function floatTo16BitPCM(float32Array) {

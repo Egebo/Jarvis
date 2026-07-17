@@ -1,4 +1,4 @@
-# 🤖 JARVIS — Kişisel Yapay Zeka Asistanı
+# 🤖 JARVIS: Kişisel Yapay Zeka Asistanı
 
 Iron Man'deki JARVIS'ten ilham alınarak yapılmış, sesle aktifleşen kişisel AI asistan.
 
