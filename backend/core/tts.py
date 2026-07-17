@@ -11,6 +11,7 @@ import asyncio
 import io
 import subprocess
 import threading
+import time
 import wave
 from backend.config import (TTS_ENGINE, TTS_RATE, TTS_VOLUME, EDGE_TTS_VOICE,
                               GEMINI_API_KEY, GEMINI_TTS_MODEL, GEMINI_TTS_VOICE,
@@ -23,6 +24,7 @@ class TextToSpeech:
         self.engine_name = TTS_ENGINE
         self._pyttsx3_engine = None
         self._gemini_client = None
+        self._gemini_blocked_until = 0.0   # kota dolunca bu zamana kadar gemini'yi atla
         self._lock = threading.Lock()
 
     def _get_pyttsx3(self):
@@ -46,11 +48,18 @@ class TextToSpeech:
         """
         if self.engine_name == "elevenlabs" and ELEVENLABS_API_KEY:
             return await self._elevenlabs(text)
-        if self.engine_name == "gemini":
+        if self.engine_name == "gemini" and time.time() >= self._gemini_blocked_until:
             try:
                 return await self._gemini(text)
             except Exception as e:
-                print(f"⚠️ Gemini TTS hatası ({e}), Edge TTS'e düşülüyor")
+                err = str(e)
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    # Ücretsiz katman: günde 10 istek. Doldu — 1 saat deneme,
+                    # her cümlede 429 beklemek gecikmeyi katlıyor.
+                    self._gemini_blocked_until = time.time() + 3600
+                    print("⚠️ Gemini TTS günlük kotası doldu — 1 saat Edge TTS kullanılacak")
+                else:
+                    print(f"⚠️ Gemini TTS hatası ({err[:120]}), Edge TTS'e düşülüyor")
         if self.engine_name in ("gemini", "edge"):
             try:
                 return await self._edge(text)

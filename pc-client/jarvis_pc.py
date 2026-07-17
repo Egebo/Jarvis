@@ -104,6 +104,9 @@ class JarvisPCClient:
         self._recv_task = None
         self.followup_until = 0.0   # Bu zamana kadar wake word'süz dinle
         self._playing = False       # Hoparlörden yanıt çalınıyor mu?
+        # Kalibrasyonla güncellenir (calibrate_noise)
+        self.start_threshold = SILENCE_THRESHOLD
+        self.end_threshold = SILENCE_THRESHOLD
         import queue
         self._audio_queue = queue.Queue()
         threading.Thread(target=self._audio_player_loop, daemon=True).start()
@@ -198,7 +201,7 @@ class JarvisPCClient:
             bar = "█" * int(level / 200) + " " * 20
             print(f"\r🎙️  [{bar[:20]}]", end="", flush=True)
 
-            if level < SILENCE_THRESHOLD:
+            if level < self.end_threshold:
                 silence_chunks += 1
                 if silence_chunks >= required_silence:
                     break
@@ -236,6 +239,29 @@ class JarvisPCClient:
             if SequenceMatcher(None, word, WAKE_WORD).ratio() >= 0.65:
                 return True
         return False
+
+    def calibrate_noise(self):
+        """
+        1.5 saniye ortam sesi dinleyip eşikleri mikrofona göre ayarla.
+        Sabit eşik (600) kimi mikrofonda çok yüksek kalıyordu — konuşma hiç
+        algılanmıyordu.
+        """
+        stream = self.pa.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
+                              input=True, frames_per_buffer=CHUNK)
+        levels = []
+        for _ in range(int(SAMPLE_RATE / CHUNK * 1.5)):
+            data = stream.read(CHUNK, exception_on_overflow=False)
+            levels.append(rms(data))
+        stream.stop_stream()
+        stream.close()
+
+        ambient = sorted(levels)[len(levels) // 2]   # medyan — ani seslerden etkilenmesin
+        # Hassas eşikler: uzaktan konuşma da yakalansın. Yanlış tetiklenme
+        # ucuz — 'jarvis' geçmeyen kayıtları tiny model zaten eliyor.
+        self.start_threshold = max(80.0, ambient * 1.8)    # konuşma başladı eşiği
+        self.end_threshold = max(60.0, ambient * 1.3)      # konuşma bitti eşiği
+        log.info(f"🎚️  Mikrofon kalibrasyonu: ortam={ambient:.0f}, "
+                 f"başlama eşiği={self.start_threshold:.0f}, bitiş eşiği={self.end_threshold:.0f}")
 
     def _transcribe_tiny(self, pcm: bytes) -> str:
         """Lokal tiny model ile hızlı transkripsiyon (sadece wake word kontrolü için)."""
@@ -275,6 +301,7 @@ class JarvisPCClient:
             #    'Jarvis'in J'si kırpılmasın)
             preroll = collections.deque(maxlen=int(0.5 * SAMPLE_RATE / CHUNK))
             waited_chunks = 0
+            voiced_streak = 0
             # Takip modunda pencere bitince çık; normalde 10s'de bir döngüye dön
             if followup:
                 max_wait_chunks = int(max(0.5, self.followup_until - time.time()) * SAMPLE_RATE / CHUNK)
@@ -283,8 +310,14 @@ class JarvisPCClient:
             while True:
                 data = stream.read(CHUNK, exception_on_overflow=False)
                 preroll.append(data)
-                if rms(data) >= SILENCE_THRESHOLD:
-                    break
+                # Konuşma başladı sayılması için üst üste 3 sesli parça iste
+                # (~200ms — eşik düştüğü için klik filtresini biraz sıkılaştır)
+                if rms(data) >= self.start_threshold:
+                    voiced_streak += 1
+                    if voiced_streak >= 3:
+                        break
+                else:
+                    voiced_streak = 0
                 waited_chunks += 1
                 if waited_chunks > max_wait_chunks:
                     return None
@@ -297,7 +330,7 @@ class JarvisPCClient:
             for _ in range(max_chunks):
                 data = stream.read(CHUNK, exception_on_overflow=False)
                 frames.append(data)
-                if rms(data) < SILENCE_THRESHOLD:
+                if rms(data) < self.end_threshold:
                     silence_chunks += 1
                     if silence_chunks >= required_silence:
                         break
@@ -323,6 +356,8 @@ class JarvisPCClient:
     # ── Ana Döngü ────────────────────────────────────────────────────────────
     async def run(self):
         await self.connect()
+        # Mikrofon eşiklerini ortama göre ayarla
+        await asyncio.get_event_loop().run_in_executor(None, self.calibrate_noise)
         print("\n" + "="*50)
         print("🤖 JARVIS AKTİF")
         print(f"   Wake word: '{WAKE_WORD}' deyin veya Enter'a basın")

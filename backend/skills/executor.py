@@ -16,10 +16,17 @@ class SkillExecutor:
     Her metod bir 'skill'e karşılık gelir.
     """
 
+    def __init__(self):
+        self._search_client = None
+
     async def execute(self, tool_name: str, tool_input: Dict) -> str:
         handlers = {
             "web_search": self.web_search,
             "open_application": self.open_application,
+            "open_url": self.open_url,
+            # "run_command": self.run_command,  # BİLİNÇLİ KAPALI: STT yanlış
+            # anlarsa tehlikeli komut çalıştırabilir. Açmadan önce sesli onay
+            # mekanizması eklenmeli (Egemen'in isteği, 17 Tem 2026).
             "system_info": self.system_info,
             "set_reminder": self.set_reminder,
             "get_weather": self.get_weather,
@@ -38,30 +45,49 @@ class SkillExecutor:
 
     # ─── Web Arama ───────────────────────────────────────────────────────────
     async def web_search(self, query: str) -> str:
-        import httpx
+        """
+        Gemini'nin Google Search grounding özelliğiyle GERÇEK web araması.
+        (Grounding aracı function-calling ile aynı istekte kullanılamadığından
+        ayrı bir Gemini çağrısı olarak yapılır; sonucu ana beyne metin döner.)
+        """
+        from google import genai
+        from google.genai import types
+        from backend.config import GEMINI_API_KEY, GEMINI_MODEL
+
         try:
-            # DuckDuckGo Instant Answer API (ücretsiz)
-            url = "https://api.duckduckgo.com/"
-            params = {"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"}
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(url, params=params)
-                data = r.json()
+            if self._search_client is None:
+                self._search_client = genai.Client(api_key=GEMINI_API_KEY)
 
-            abstract = data.get("AbstractText", "")
-            answer = data.get("Answer", "")
-            related = [r["Text"] for r in data.get("RelatedTopics", [])[:3] if "Text" in r]
-
-            result = ""
-            if answer:
-                result += f"Cevap: {answer}\n"
-            if abstract:
-                result += f"Özet: {abstract}\n"
-            if related:
-                result += "İlgili: " + " | ".join(related)
-
-            return result or f"'{query}' için sonuç bulunamadı."
+            response = await self._search_client.aio.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=(
+                    "Google'da araştır ve bulduklarını Türkçe, kaynak isimleriyle "
+                    f"birlikte kısa ve öz özetle: {query}"
+                ),
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                ),
+            )
+            return response.text or f"'{query}' için sonuç bulunamadı."
         except Exception as e:
-            return f"Arama hatası: {e}"
+            # Grounding kotası dolduysa (ücretsiz katmanda günlük limit düşük)
+            # DuckDuckGo ile gerçek arama sonuçlarına düş
+            return await self._ddg_search(query, reason=str(e)[:80])
+
+    async def _ddg_search(self, query: str, reason: str = "") -> str:
+        """Yedek arama: DuckDuckGo gerçek sonuç listesi (kota gerektirmez)."""
+        def _search():
+            from ddgs import DDGS
+            return list(DDGS().text(query, region="tr-tr", max_results=5))
+
+        try:
+            results = await asyncio.get_event_loop().run_in_executor(None, _search)
+            if not results:
+                return f"'{query}' için sonuç bulunamadı."
+            lines = [f"- {r['title']}: {r['body']}" for r in results]
+            return "Arama sonuçları:\n" + "\n".join(lines)
+        except Exception as e:
+            return f"Arama hatası (yedek de başarısız): {e} | ilk hata: {reason}"
 
     # ─── Uygulama Açma ───────────────────────────────────────────────────────
     async def open_application(self, name: str, args: str = "") -> str:
@@ -92,7 +118,13 @@ class SkillExecutor:
 
         try:
             if system == "Windows":
-                subprocess.Popen(cmd, shell=True)
+                # 'start' kullan: uygulamayı PATH'te olmasa da App Paths
+                # kaydından bulur (chrome, spotify vs. PATH'te değildir)
+                proc = subprocess.run(f'start "" {cmd}', shell=True,
+                                      capture_output=True, text=True, timeout=10)
+                if proc.returncode != 0:
+                    hata = (proc.stderr or "").strip()
+                    return f"❌ {name} açılamadı: {hata or 'uygulama bulunamadı'}"
             elif system == "Darwin":
                 subprocess.Popen(["open", "-a", name])
             else:
@@ -100,6 +132,39 @@ class SkillExecutor:
             return f"✅ {name} açıldı."
         except Exception as e:
             return f"❌ {name} açılamadı: {e}"
+
+    # ─── URL Açma ────────────────────────────────────────────────────────────
+    async def open_url(self, url: str) -> str:
+        import webbrowser
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        webbrowser.open(url)
+        return f"✅ Tarayıcıda açıldı: {url}"
+
+    # ─── Genel PowerShell Komutu ─────────────────────────────────────────────
+    async def run_command(self, command: str) -> str:
+        """
+        Jarvis'in genel PC yönetim aracı: ses/parlaklık ayarı, dosya işlemleri,
+        pencere/işlem yönetimi... Egemen'in kendi bilgisayarında, kendi sesli
+        komutuyla tetiklenir.
+        """
+        print(f"💻 PowerShell: {command}")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "powershell", "-NoProfile", "-NonInteractive", "-Command", command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = out.decode("utf-8", errors="ignore").strip()
+            error = err.decode("utf-8", errors="ignore").strip()
+            if proc.returncode != 0:
+                return f"Komut hatası (kod {proc.returncode}): {error[:300]}"
+            return output[:500] if output else "✅ Komut çalıştı (çıktı yok)."
+        except asyncio.TimeoutError:
+            return "Komut 30 saniyede bitmedi, iptal edildi."
+        except Exception as e:
+            return f"Komut çalıştırılamadı: {e}"
 
     # ─── Sistem Bilgisi ──────────────────────────────────────────────────────
     async def system_info(self, metric: str = "all") -> str:

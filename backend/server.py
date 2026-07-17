@@ -87,7 +87,11 @@ class ConnectionManager:
     async def send(self, client_id: str, data: dict):
         ws = self.active.get(client_id)
         if ws:
-            await ws.send_text(json.dumps(data, ensure_ascii=False))
+            try:
+                await ws.send_text(json.dumps(data, ensure_ascii=False))
+            except RuntimeError:
+                # Bağlantı bu arada kapandıysa sunucuyu düşürme
+                self.disconnect(client_id)
 
     async def broadcast(self, data: dict):
         for ws in self.active.values():

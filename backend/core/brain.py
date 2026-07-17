@@ -47,6 +47,20 @@ class JarvisBrain:
                 }
             ),
             types.FunctionDeclaration(
+                name="open_url",
+                description="Tarayıcıda bir web sitesi/URL açar.",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "Açılacak adres (örn: 'youtube.com')"}
+                    },
+                    "required": ["url"]
+                }
+            ),
+            # NOT: run_command (PowerShell) aracı bilinçli olarak tanımlı değil —
+            # STT yanlış anlarsa tehlikeli komut riski. executor.py'de kodu duruyor;
+            # sesli onay mekanizmasıyla birlikte açılacak.
+            types.FunctionDeclaration(
                 name="system_info",
                 description="Bilgisayar durumu hakkında bilgi alır (RAM, CPU, pil, disk).",
                 parameters_json_schema={

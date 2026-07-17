@@ -5,6 +5,7 @@ google-genai>=1.0.0
 openai-whisper
 pyttsx3>=2.90
 edge-tts>=6.1.0
+ddgs>=9.0.0
 elevenlabs>=1.2.0
 pyaudio==0.2.14
 numpy>=2.0.0
