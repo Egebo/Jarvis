@@ -128,3 +128,12 @@ Jarvis/
 │   └── start_pc_client.bat
 └── .env.example
 ```
+
+## Lisans
+
+Bu proje MIT lisansi ile lisanslanmistir, detaylar icin LICENSE dosyasina bakabilirsiniz.
+
+## Gelistirici
+
+Egemen Bozca tarafindan gelistirilmektedir.
+Portfolyo: https://egebo.github.io | GitHub: https://github.com/Egebo
