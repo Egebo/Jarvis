@@ -89,6 +89,6 @@ APPROVAL_TIMEOUT = float(os.getenv("APPROVAL_TIMEOUT", "120"))  # sn; dolarsa RE
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "25"))
 
 # ─── Kalıcı Hafıza ──────────────────────────────────────────────────────────
-# WORKSPACE_DIR gibi repo DIŞINDA tutulur — kişisel bilgi git'e karışmasın.
+# WORKSPACE_DIR gibi repo DIŞINDA tutulur, kişisel bilgi git'e karışmasın.
 MEMORY_DIR = Path(os.getenv("JARVIS_MEMORY_DIR",
                             str(Path.home() / "Desktop" / "Jarvis-Memory")))

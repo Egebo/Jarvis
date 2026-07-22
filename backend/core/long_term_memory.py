@@ -1,5 +1,5 @@
 """
-Kalıcı hafıza deposu — Egemen'le ilgili bilgiyi kategorilere ayrılmış
+Kalıcı hafıza deposu, Egemen'le ilgili bilgiyi kategorilere ayrılmış
 Markdown dosyalarında tutar. Repo dışında (backend.config.MEMORY_DIR).
 Spec: docs/superpowers/specs/2026-07-22-kalici-hafiza-design.md
 """
