@@ -84,14 +84,20 @@ Ayarlar ekranından PC'nizin yerel IP'sini girin.
 | Ekran görüntüsü | ✅ |
 | PC client | ✅ |
 | Mobil (React Native) | ✅ |
-| Konuşma hafızası | ✅ |
+| Konuşma hafızası (oturum içi) | ✅ |
+| Kalıcı hafıza (not alma, yapılacaklar, otomatik öğrenme) | ✅ |
 | Arka plan görev ajanı (araştırma+rapor, dosya işleri) | ✅ |
 | Riskli adımlarda sesli onay | ✅ |
 
 ## Gelişmiş TTS
 
-Varsayılan olarak `pyttsx3` (ücretsiz, offline) kullanılır.
-Yüksek kalite için ElevenLabs:
+Varsayılan motor `edge` (Microsoft Edge TTS — ücretsiz, nöral Türkçe ses).
+Daha doğal bir ton için Gemini TTS (ücretli katman gerektirir, ses üretimi
+sohbetten pahalıdır — bkz. `.env.example`):
+```
+TTS_ENGINE=gemini
+```
+Ya da ElevenLabs:
 ```
 ELEVENLABS_API_KEY=your_key
 TTS_ENGINE=elevenlabs
@@ -99,12 +105,20 @@ TTS_ENGINE=elevenlabs
 
 ## Görev Ajanı
 
-"Jarvis, dinozorları araştır ve masaüstündeki klasöre rapor yaz" gibi çok adımlı
-işler arka planda çalışan görev ajanına devredilir; sen bu sırada Jarvis'le
-konuşmaya devam edebilirsin. Çıktılar `Masaüstü/Jarvis-Workspace/` klasörüne yazılır.
+"Jarvis, dinozorları araştır ve rapor yaz" gibi çok adımlı işler arka planda
+çalışan görev ajanına devredilir; sen bu sırada Jarvis'le konuşmaya devam
+edebilirsin. Çıktılar `Documents/Jarvis/Workspace/` klasörüne yazılır.
 Riskli adımlarda (silme, taşıma, workspace dışına yazma, komut çalıştırma) Jarvis
 sesli onay ister; kısa bir "evet" veya "hayır" yeterlidir (yalnızca PC istemcisinden).
 Detaylı tasarım: `docs/superpowers/specs/2026-07-22-gorev-ajani-design.md`
+
+## Kalıcı Hafıza
+
+Jarvis oturumlar arası hatırlar: "not al"/"unutma ki" dediklerini, yapılacaklar
+listeni, ve konuşma bitince arka planda kendiliğinden çıkardığı bilgileri/özetleri.
+Veriler `Documents/Jarvis/Memory/` altında düz Markdown dosyaları halinde tutulur
+(repo dışında, kişisel bilgi git'e karışmaz). Detaylı tasarım:
+`docs/superpowers/specs/2026-07-22-kalici-hafiza-design.md`
 
 ## Yeni Yetenek Eklemek
 
@@ -117,10 +131,12 @@ ardından `backend/core/brain.py` içindeki `_define_tools()` listesine tanımı
 Jarvis/
 ├── backend/
 │   ├── core/
-│   │   ├── brain.py      # Gemini AI entegrasyonu
-│   │   ├── memory.py     # Konuşma hafızası
-│   │   ├── stt.py        # Whisper STT
-│   │   └── tts.py        # Ses sentezi
+│   │   ├── brain.py             # Gemini AI entegrasyonu
+│   │   ├── memory.py            # Oturum içi konuşma hafızası
+│   │   ├── long_term_memory.py  # Kalıcı hafıza deposu (MemoryStore)
+│   │   ├── memory_digest.py     # Arka plan konuşma özetleme
+│   │   ├── stt.py               # Whisper STT
+│   │   └── tts.py               # Ses sentezi
 │   ├── skills/
 │   │   └── executor.py   # Araçlar (hava, arama, sistem...)
 │   ├── server.py         # FastAPI + WebSocket sunucu
