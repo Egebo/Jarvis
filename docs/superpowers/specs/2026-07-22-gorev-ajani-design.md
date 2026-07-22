@@ -85,3 +85,7 @@ Kullanıcı: "Jarvis, dinozorları araştır, rapor hazırla"
 
 - Birden fazla eşzamanlı görev, görev kalıcılığı (Faz 2), proaktif tetikleme (Faz 3),
   mobil bildirimler, Claude/başka LLM entegrasyonu.
+- **Konuşmacı tanıma (gelecek faz, Egemen'in isteği):** Temel işlevler herkesin
+  sesiyle; riskli komutlar ve görev onayları yalnızca Egemen'in ses imzasıyla.
+  Onay akışı (waiting_approval) bu doğrulamanın ekleneceği nokta olacak şekilde
+  tasarlandı.
