@@ -103,3 +103,21 @@ async def test_runner_exception_fails_task():
     await asyncio.sleep(0.05)
     assert tm.state == TaskState.FAILED
     assert events[-1][0] == "failed"
+
+
+async def test_double_decisive_utterance_is_safe():
+    events = []
+    tm = make_tm(events, timeout=5)
+
+    async def runner(tm_):
+        await tm_.request_approval("riskli adım")
+        return "bitti"
+
+    tm.start("işZ", runner)
+    await asyncio.sleep(0.05)
+    first = await tm.handle_utterance("evet")
+    assert first is not None
+    # request_approval henüz uyanmadan gelen ikinci karar patlamamalı
+    second = await tm.handle_utterance("evet")
+    assert second is None
+    await asyncio.sleep(0.05)

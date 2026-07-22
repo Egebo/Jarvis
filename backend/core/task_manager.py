@@ -102,5 +102,7 @@ class TaskManager:
         verdict = parse_approval(text)
         if verdict is None:
             return None
+        if self._approval_future.done():
+            return None
         self._approval_future.set_result(verdict)
         return "Anlaşıldı, devam ediyorum." if verdict else "Anlaşıldı, o adımı iptal ediyorum."
