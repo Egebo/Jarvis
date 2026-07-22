@@ -16,6 +16,8 @@ Kurallar:
 - Araştırma işlerinde web_search kullan; birden fazla arama yapabilirsin.
 - Riskli adımlar kullanıcı onayından geçer; RED gelirse o adımı atla, işi
   elindekiyle bitir ve durumu son özetinde belirt.
+- Göreli yollar HER ZAMAN workspace içine yazılır. Workspace DIŞINA yazman
+  gerekiyorsa (örn. Masaüstü) MUTLAK yol kullan; o adım kullanıcı onayına gider.
 - İş bitince SON mesajın kullanıcıya SESLİ okunacak kısa bir Türkçe özet olsun
   (2-3 cümle): ne yaptın, çıktı nerede.
 """
@@ -39,12 +41,16 @@ class TaskAgent:
 
     # ── gerçek Gemini (generate_fn verilmediyse) ──
     async def _real_generate(self, contents):
+        from pathlib import Path
         from google import genai
         from google.genai import types
         if not hasattr(self, "_client"):
             self._client = genai.Client(api_key=GEMINI_API_KEY)
+        env_info = (f"\nWorkspace: {self.ft.workspace}"
+                    f"\nKullanıcı ev dizini: {Path.home()}"
+                    f"\nKullanıcı Masaüstü: {Path.home() / 'Desktop'}")
         config = types.GenerateContentConfig(
-            system_instruction=AGENT_SYSTEM_PROMPT + f"\nWorkspace: {self.ft.workspace}",
+            system_instruction=AGENT_SYSTEM_PROMPT + env_info,
             tools=[types.Tool(function_declarations=self._declarations())],
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
