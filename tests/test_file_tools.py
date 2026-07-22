@@ -43,3 +43,8 @@ def test_approval_rules(tmp_path):
     for tool in ("delete_path", "move_path", "copy_path", "run_command"):
         ok, _ = requires_approval(tool, {"path": "ws-ici.txt", "src": "a", "dst": "b", "command": "dir"}, ws)
         assert ok is True  # her zaman onaylı
+
+
+def test_relative_traversal_requires_approval(tmp_path):
+    ok, desc = requires_approval("write_file", {"path": "../kacak.txt", "content": ""}, tmp_path)
+    assert ok is True and "kacak.txt" in desc

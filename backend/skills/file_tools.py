@@ -87,9 +87,10 @@ def requires_approval(tool_name: str, args: dict, workspace: Path) -> tuple[bool
     if tool_name == "write_file":
         p = Path(args.get("path", ""))
         if not p.is_absolute():
-            return False, ""
+            p = workspace / p
+        p = p.resolve()
         try:
-            p.resolve().relative_to(workspace)
+            p.relative_to(workspace)
             return False, ""
         except ValueError:
             return True, f"workspace dışına dosya yazacağım: {p}"
