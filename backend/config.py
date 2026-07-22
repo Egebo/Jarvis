@@ -48,6 +48,10 @@ GEMINI_TTS_STYLE = os.getenv(
 )
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "tr-TR-AhmetNeural")  # ücretsiz nöral Türkçe ses
 EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+15%")     # Edge konuşma hızı ("+0%" = normal)
+# Tüm motorlardan çıkan sesi (Gemini dahil) üretimden sonra hızlandırır —
+# Gemini TTS'te motor bazlı hız parametresi yok, prompt'a güvenmek yerine
+# ffmpeh atempo ile garantili hızlandırma (1.0 = değişiklik yok)
+TTS_SPEED = float(os.getenv("TTS_SPEED", "1.3"))
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam voice
 TTS_RATE = int(os.getenv("TTS_RATE", "175"))           # Konuşma hızı (pyttsx3)
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "0.9"))
@@ -59,6 +63,10 @@ STT_LANGUAGE = os.getenv("STT_LANGUAGE", "tr")         # tr veya en
 # ─── Wake Word ──────────────────────────────────────────────────────────────
 WAKE_WORD = os.getenv("WAKE_WORD", "jarvis")           # "jarvis", "hey jarvis", vs.
 WAKE_WORD_SENSITIVITY = float(os.getenv("WAKE_WORD_SENSITIVITY", "0.7"))
+# Yanıttan sonra bu süre içinde wake word gerekmez (doğal sohbet devamı).
+# Eşleştirme artık sunucuda yapılıyor (backend/core/wakeword.py) — hem PC hem
+# web istemcisi aynı mantığı, aynı yerden kullanır.
+FOLLOWUP_WINDOW = float(os.getenv("FOLLOWUP_WINDOW", "8.0"))
 
 # ─── Sunucu ─────────────────────────────────────────────────────────────────
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")

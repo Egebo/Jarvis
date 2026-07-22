@@ -132,22 +132,29 @@
     border: 2px solid var(--idle); background: #00BFFF10;
     display: flex; align-items: center; justify-content: center;
     font-size: 34px; cursor: pointer; user-select: none;
-    transition: border-color 0.3s;
+    transition: border-color 0.3s, opacity 0.3s;
     -webkit-tap-highlight-color: transparent;
   }
   #mic-btn.recording { animation: pulse 1s infinite; }
+  #mic-btn.muted { opacity: 0.4; }
   #mic-btn.disabled { opacity: 0.35; cursor: not-allowed; }
   @keyframes pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.12); }
   }
   #mic-hint { font-size: 10px; letter-spacing: 2px; color: #FFFFFF30; }
-  #reset-btn {
+  .btn-row { display: flex; gap: 10px; }
+  #reset-btn, #interrupt-btn {
     background: transparent; border: 1px solid #FFFFFF20; color: #FFFFFF50;
     padding: 6px 18px; border-radius: 4px; font-size: 11px; letter-spacing: 1px;
     cursor: pointer; font-family: inherit;
   }
   #reset-btn:hover { border-color: #FFFFFF40; color: #FFFFFF80; }
+  #interrupt-btn {
+    display: none;
+    border-color: #FF6B6B50; color: #FF6B6B;
+  }
+  #interrupt-btn:hover { background: #FF6B6B15; border-color: #FF6B6B; }
   #chat::-webkit-scrollbar { width: 4px; }
   #chat::-webkit-scrollbar-thumb { background: #00BFFF30; border-radius: 2px; }
 </style>
@@ -175,9 +182,12 @@
   </form>
 
   <div class="controls">
-    <div id="mic-btn" title="Basılı tutup konuşun">🎙</div>
-    <div id="mic-hint">BASILI TUTUN</div>
-    <button id="reset-btn" type="button">↺ SIFIRLA</button>
+    <div id="mic-btn" title="Tıkla: sürekli dinlemeyi başlat">🎙</div>
+    <div id="mic-hint">TIKLA: SÜREKLİ DİNLEMEYİ BAŞLAT</div>
+    <div class="btn-row">
+      <button id="reset-btn" type="button">↺ SIFIRLA</button>
+      <button id="interrupt-btn" type="button">⏹ KES (Enter)</button>
+    </div>
   </div>
 </div>
 
@@ -185,15 +195,14 @@
 (function () {
   "use strict";
 
-  var STATE_LABELS = {
-    idle: '😴 Bekliyor', connecting: '🔌 Bağlanıyor', listening: '👂 Dinliyor',
-    transcribing: '👂 Anlıyor', thinking: '🧠 Düşünüyor', speaking: '🔊 Konuşuyor',
-    error: '⚠️ Hata', reset: '😴 Bekliyor'
+  // idle dışındaki durumlar sunucudan gelir, sabit metin/renk yeterli.
+  var STATE_TEXT = {
+    connecting: '🔌 Bağlanıyor', transcribing: '👂 Anlıyor', thinking: '🧠 Düşünüyor',
+    speaking: '🔊 Konuşuyor', error: '⚠️ Hata', reset: '😴 Bekliyor'
   };
-  var STATE_COLORS = {
-    idle: '#00BFFF', connecting: '#FFD700', listening: '#00FF7F',
-    transcribing: '#00BFFF', thinking: '#FF6B6B', speaking: '#9B59B6',
-    error: '#FF4444', reset: '#00BFFF'
+  var STATE_COLOR = {
+    connecting: '#FFD700', transcribing: '#00BFFF', thinking: '#FF6B6B',
+    speaking: '#9B59B6', error: '#FF4444', reset: '#00BFFF'
   };
 
   var chatEl = document.getElementById('chat');
@@ -206,14 +215,35 @@
   var textForm = document.getElementById('text-form');
   var textInput = document.getElementById('text-input');
   var resetBtn = document.getElementById('reset-btn');
+  var interruptBtn = document.getElementById('interrupt-btn');
   var warningEl = document.getElementById('warning');
 
   var state = 'connecting';
   var ws = null;
-  var recording = false;
   var micAllowed = true;
   var audioCtx = null, source = null, processor = null, micStream = null;
-  var pcmChunks = [];
+
+  // ─── Sürekli dinleme durumu (PC client'taki mantığın web karşılığı) ────
+  // Push-to-talk yerine: mikrofon bir kez açılır, sürekli açık kalır;
+  // ses seviyesi eşiği aşınca kayıt başlar, sessizlik gelince biter ve
+  // otomatik gönderilir. 'Jarvis' geçip geçmediğine ve takip penceresine
+  // artık SUNUCU karar verir (backend/core/wakeword.py) — burada sadece
+  // ne zaman kayıt başlayıp biteceği belirlenir.
+  var continuousActive = false;
+  var micMuted = false;
+  var calibrating = false;
+  var calibSamples = [];
+  var startThreshold = 0.02, endThreshold = 0.015;   // kalibrasyonla güncellenir
+  var prerollBuffer = [];
+  var voicedStreak = 0;
+  var recordingUtterance = false;
+  var utteranceChunks = [];
+  var recordedChunkCount = 0;
+  var silenceStreak = 0;
+  var pendingSkipGate = false;
+  var chunkDurationMs = 0, calibChunksNeeded = 1, prerollMaxChunks = 1,
+      requiredSilenceChunks = 1, maxRecordChunks = 1;
+  var currentAudio = null;
 
   var clientId = 'web-' + Math.random().toString(36).substring(2, 11);
 
@@ -226,14 +256,60 @@
     warningEl.textContent = '⚠️ Mikrofon için bu sayfayı http://localhost:8765 üzerinden açın. Metin ile sohbet etmeye devam edebilirsiniz.';
   }
 
-  function setState(s) {
-    state = s;
-    var color = STATE_COLORS[s] || STATE_COLORS.idle;
+  // idle durumunun kendi içinde alt durumları var: mikrofon hiç açılmadıysa
+  // "uykuda", açık ama sessize alındıysa "sessize alındı", kalibre oluyorsa
+  // "kalibre ediliyor", yoksa "beklemede — Jarvis bekliyorum". Bu ayrım
+  // olmadan kullanıcı Jarvis'in dinleyip dinlemediğini anlayamıyordu
+  // (Egemen'in geri bildirimi, 22 Tem 2026).
+  function idleLabel() {
+    if (!continuousActive) return { text: '😴 UYKUDA — TIKLA UYANDIR', color: '#00BFFF' };
+    if (calibrating) return { text: '🎚 KALİBRE EDİLİYOR...', color: '#FFD700' };
+    if (micMuted) return { text: '🔇 SESSİZE ALINDI', color: '#FFD700' };
+    return { text: '👂 BEKLEMEDE — "JARVIS" DE', color: '#00FF7F' };
+  }
+
+  function labelFor(s) {
+    if (s === 'idle') return idleLabel();
+    return { text: STATE_TEXT[s] || s, color: STATE_COLOR[s] || '#00BFFF' };
+  }
+
+  function applyRawLabel(text, color) {
     statusDot.style.background = color;
     statusText.style.color = color;
-    statusText.textContent = (STATE_LABELS[s] || s).toUpperCase();
+    statusText.textContent = text.toUpperCase();
     titleEl.style.color = color;
     if (micAllowed) micBtn.style.borderColor = color;
+  }
+
+  // 'ignored' geldiğinde durum makinesini (idle) bozmadan kısa süreliğine
+  // "sana değildi" mesajı gösterir, sonra gerçek duruma geri döner.
+  var ignoredUntil = 0;
+
+  function renderStatus() {
+    if (Date.now() < ignoredUntil) {
+      applyRawLabel('🙉 Sana değildi (duymazdan geldim)', '#666699');
+    } else {
+      var l = labelFor(state);
+      applyRawLabel(l.text, l.color);
+    }
+  }
+
+  function setState(s) {
+    state = s;
+    if (s !== 'idle') ignoredUntil = 0;   // gerçek bir ilerleme flash'ı ezsin
+    renderStatus();
+  }
+
+  function flashIgnored() {
+    ignoredUntil = Date.now() + 1300;
+    renderStatus();
+    setTimeout(renderStatus, 1300);
+  }
+
+  // Mikrofon yerel durumu değiştiğinde (kalibrasyon bitti, sessize alındı...)
+  // sunucudan yeni bir 'status' gelmeden de başlık güncellensin.
+  function refreshIdleDisplay() {
+    if (state === 'idle') renderStatus();
   }
 
   function addBubble(role, text) {
@@ -279,6 +355,9 @@
       } else if (msg.type === 'error') {
         console.error('Sunucu hatası:', msg.data);
         addBubble('jarvis', '⚠️ Hata: ' + msg.data);
+      } else if (msg.type === 'ignored') {
+        console.log('Sana değildi:', msg.data);
+        flashIgnored();
       }
     };
 
@@ -301,7 +380,7 @@
     }
   }
 
-  // ─── Sunucudan gelen sesi çal (WAV, pyttsx3 varsayılan) ────
+  // ─── Sunucudan gelen sesi çal (WAV, cümle cümle gelir) ──────
   function base64ToBlob(base64, mime) {
     var byteChars = atob(base64);
     var byteNumbers = new Uint8Array(byteChars.length);
@@ -309,7 +388,6 @@
     return new Blob([byteNumbers], { type: mime });
   }
 
-  // Ses parçaları cümle cümle gelir; kuyruğa alıp sırayla çal
   var audioQueue = [];
   var audioPlaying = false;
 
@@ -319,18 +397,26 @@
   }
 
   function playNextAudio() {
-    if (audioQueue.length === 0) { audioPlaying = false; return; }
+    if (audioQueue.length === 0) {
+      audioPlaying = false;
+      currentAudio = null;
+      interruptBtn.style.display = 'none';
+      return;
+    }
     audioPlaying = true;
+    interruptBtn.style.display = 'inline-block';
     var base64 = audioQueue.shift();
     try {
       var blob = base64ToBlob(base64, 'audio/wav');
       var url = URL.createObjectURL(blob);
       var audio = new Audio(url);
+      currentAudio = audio;
       audio.onended = function () { URL.revokeObjectURL(url); playNextAudio(); };
       audio.onerror = function () { URL.revokeObjectURL(url); playNextAudio(); };
       audio.play().catch(function (err) {
         console.warn('Otomatik ses oynatma engellendi:', err);
         audioPlaying = false;
+        interruptBtn.style.display = 'none';
       });
     } catch (e) {
       console.error('Ses çalma hatası:', e);
@@ -338,7 +424,33 @@
     }
   }
 
-  // ─── Mikrofon kaydı: push-to-talk, ham PCM 16bit/16kHz ─────
+  // Barge-in: çalan sesi kes, kuyruktaki bekleyenleri at (PC client'taki
+  // Enter'la kesme ile aynı fikir — sesle kesmek mikrofonun kendi
+  // hoparlörünü duyup karışmasına yol açtığı için burada da tercih edilmedi).
+  function interruptPlayback() {
+    audioQueue = [];
+    if (currentAudio) {
+      try { currentAudio.pause(); currentAudio.currentTime = 0; } catch (e) {}
+    }
+    audioPlaying = false;
+    currentAudio = null;
+    interruptBtn.style.display = 'none';
+  }
+
+  function beep() {
+    if (!audioCtx) return;
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.15;
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } catch (e) {}
+  }
+
+  // ─── Mikrofon: sürekli dinleme, ham PCM 16bit/16kHz ─────────
   // Not: backend/core/stt.py "transcribe_bytes" ham PCM (header'sız)
   // bekliyor ve kendi WAV başlığını ekliyor; bu yüzden burada
   // MediaRecorder (webm/opus) değil, Web Audio API ile ham örnekler
@@ -383,8 +495,61 @@
     return btoa(binary);
   }
 
-  function startRecording() {
-    if (!micAllowed || recording) return;
+  function computeRmsFloat(chunk) {
+    var sum = 0;
+    for (var i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+    return Math.sqrt(sum / chunk.length);
+  }
+
+  function mergeChunks(chunks) {
+    var totalLen = 0;
+    chunks.forEach(function (c) { totalLen += c.length; });
+    var merged = new Float32Array(totalLen);
+    var off = 0;
+    chunks.forEach(function (c) { merged.set(c, off); off += c.length; });
+    return merged;
+  }
+
+  function finishCalibration() {
+    calibrating = false;
+    var sorted = calibSamples.slice().sort(function (a, b) { return a - b; });
+    var ambient = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+    startThreshold = Math.max(0.0025, ambient * 1.8);
+    endThreshold = Math.max(0.0018, ambient * 1.3);
+    console.log('Mikrofon kalibrasyonu: ortam=' + ambient.toFixed(4) +
+                ' başlama=' + startThreshold.toFixed(4) + ' bitiş=' + endThreshold.toFixed(4));
+    micHint.textContent = 'TIKLA: SESSİZE AL';
+    refreshIdleDisplay();
+  }
+
+  function beginRecording() {
+    recordingUtterance = true;
+    utteranceChunks = prerollBuffer.slice();
+    recordedChunkCount = utteranceChunks.length;
+    silenceStreak = 0;
+    micBtn.classList.add('recording');
+  }
+
+  function finishUtterance() {
+    recordingUtterance = false;
+    voicedStreak = 0;
+    prerollBuffer = [];
+    micBtn.classList.remove('recording');
+
+    var merged = mergeChunks(utteranceChunks);
+    utteranceChunks = [];
+    if (merged.length === 0) return;
+
+    var downsampled = downsample(merged, audioCtx.sampleRate, 16000);
+    var pcm16 = floatTo16BitPCM(downsampled);
+    var base64 = arrayBufferToBase64(pcm16);
+    var skipGate = pendingSkipGate;
+    pendingSkipGate = false;
+    send({ type: 'audio', data: base64, skip_gate: skipGate });
+  }
+
+  function initContinuousListening() {
+    if (!micAllowed || continuousActive) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert('Bu tarayıcı mikrofon erişimini desteklemiyor.');
       return;
@@ -392,18 +557,61 @@
 
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       micStream = stream;
-      recording = true;
-      micBtn.classList.add('recording');
-      micHint.textContent = 'BIRAKIN';
-      setState('listening');
+      continuousActive = true;
+      calibrating = true;
+      calibSamples = [];
+      micHint.textContent = 'TIKLA: SESSİZE AL';
+      refreshIdleDisplay();
 
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       source = audioCtx.createMediaStreamSource(micStream);
       processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      pcmChunks = [];
+
+      chunkDurationMs = (processor.bufferSize / audioCtx.sampleRate) * 1000;
+      calibChunksNeeded = Math.max(1, Math.ceil(1500 / chunkDurationMs));
+      prerollMaxChunks = Math.max(1, Math.ceil(500 / chunkDurationMs));
+      requiredSilenceChunks = Math.max(1, Math.ceil(1200 / chunkDurationMs));
+      maxRecordChunks = Math.ceil(12000 / chunkDurationMs);
 
       processor.onaudioprocess = function (e) {
-        pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        if (micMuted) return;
+        var chunk = new Float32Array(e.inputBuffer.getChannelData(0));
+        var chunkRms = computeRmsFloat(chunk);
+
+        if (calibrating) {
+          calibSamples.push(chunkRms);
+          if (calibSamples.length >= calibChunksNeeded) finishCalibration();
+          return;
+        }
+
+        // Jarvis konuşurken veya kendi isteğimiz işlenirken dinleme —
+        // mikrofonun kendi hoparlör sesini komut sanmasını önler.
+        if (audioPlaying || state !== 'idle') {
+          voicedStreak = 0;
+          prerollBuffer = [];
+          return;
+        }
+
+        if (!recordingUtterance) {
+          prerollBuffer.push(chunk);
+          if (prerollBuffer.length > prerollMaxChunks) prerollBuffer.shift();
+          if (chunkRms >= startThreshold) {
+            voicedStreak++;
+            if (voicedStreak >= 3) beginRecording();
+          } else {
+            voicedStreak = 0;
+          }
+        } else {
+          utteranceChunks.push(chunk);
+          recordedChunkCount++;
+          if (chunkRms < endThreshold) {
+            silenceStreak++;
+            if (silenceStreak >= requiredSilenceChunks) finishUtterance();
+          } else {
+            silenceStreak = 0;
+          }
+          if (recordedChunkCount >= maxRecordChunks) finishUtterance();
+        }
       };
 
       var silentGain = audioCtx.createGain();
@@ -416,40 +624,40 @@
     });
   }
 
-  function stopRecording() {
-    if (!recording) return;
-    recording = false;
-    micBtn.classList.remove('recording');
-    micHint.textContent = 'BASILI TUTUN';
-
-    if (processor) { processor.disconnect(); }
-    if (source) { source.disconnect(); }
-    if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); }
-
-    var inRate = audioCtx ? audioCtx.sampleRate : 44100;
-    if (audioCtx) { audioCtx.close(); }
-
-    var totalLen = 0;
-    pcmChunks.forEach(function (c) { totalLen += c.length; });
-    var merged = new Float32Array(totalLen);
-    var off = 0;
-    pcmChunks.forEach(function (c) { merged.set(c, off); off += c.length; });
-    pcmChunks = [];
-
-    if (totalLen === 0) { setState('idle'); return; }
-
-    var downsampled = downsample(merged, inRate, 16000);
-    var pcm16 = floatTo16BitPCM(downsampled);
-    var base64 = arrayBufferToBase64(pcm16);
-
-    send({ type: 'audio', data: base64 });
+  function toggleMute() {
+    micMuted = !micMuted;
+    micBtn.classList.toggle('muted', micMuted);
+    micHint.textContent = micMuted ? 'TIKLA: SESİ AÇ' : 'TIKLA: SESSİZE AL';
+    refreshIdleDisplay();
   }
 
-  micBtn.addEventListener('mousedown', startRecording);
-  micBtn.addEventListener('mouseup', stopRecording);
-  micBtn.addEventListener('mouseleave', function () { if (recording) stopRecording(); });
-  micBtn.addEventListener('touchstart', function (e) { e.preventDefault(); startRecording(); });
-  micBtn.addEventListener('touchend', function (e) { e.preventDefault(); stopRecording(); });
+  // Enter'a basıldığında (metin kutusunda değilken): PC client'taki manuel
+  // aktivasyonun web karşılığı — wake word beklemeden hemen kayda başlar,
+  // konuşma sırasında basılırsa önce mevcut sesi keser.
+  function manualRecord() {
+    if (!continuousActive || micMuted || recordingUtterance) return;
+    pendingSkipGate = true;
+    beginRecording();
+    beep();
+  }
+
+  micBtn.addEventListener('click', function () {
+    if (!continuousActive) {
+      initContinuousListening();
+    } else {
+      toggleMute();
+    }
+  });
+
+  interruptBtn.addEventListener('click', interruptPlayback);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    if (document.activeElement === textInput) return; // form gönderimine karışma
+    e.preventDefault();
+    if (audioPlaying) interruptPlayback();
+    manualRecord();
+  });
 
   // ─── Metin girişi ───────────────────────────────────────────
   textForm.addEventListener('submit', function (e) {

@@ -24,6 +24,7 @@ import base64
 import json
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -33,10 +34,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.config import SERVER_HOST, SERVER_PORT
+from backend.config import SERVER_HOST, SERVER_PORT, FOLLOWUP_WINDOW
 from backend.core.brain import JarvisBrain
 from backend.core.stt import SpeechToText
 from backend.core.tts import TextToSpeech
+from backend.core.wakeword import matches_wake_word
 from backend.skills.executor import SkillExecutor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -131,6 +133,10 @@ manager = ConnectionManager()
 
 # ─── Oturum Yönetimi ────────────────────────────────────────────────────────
 sessions: dict[str, JarvisBrain] = {}
+# Yanıttan sonraki kısa pencerede wake word'süz devam edilebilsin diye
+# (client_id -> bu zamana kadar geçerli). Sadece sesli girişte kullanılır;
+# yazılı mesajlar zaten niyet bildirdiği için hiç gate'lenmez.
+followup_until: dict[str, float] = {}
 
 def get_brain(client_id: str) -> JarvisBrain:
     if client_id not in sessions:
@@ -165,8 +171,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     await manager.send(client_id, {"type": "status", "data": "idle"})
                     continue
 
-                await manager.send(client_id, {"type": "transcript", "data": transcript})
-
                 tm = app.state.task_manager
                 # Onaylar yalnızca PC istemcisinden (Egemen kararı, 22 Tem 2026)
                 if tm.waiting_approval and client_id.startswith("pc-"):
@@ -175,7 +179,27 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         await _speak_short(client_id, ack)
                         continue
 
+                # Wake word gate: 'Jarvis' geçmiyorsa ve takip penceresinde
+                # değilsek sessizce yok say — odadaki alakasız konuşmalar
+                # (TV, sohbet) komut sanılmasın. Gate hem PC hem web istemcisi
+                # için tek yerde (backend/core/wakeword.py) uygulanır.
+                # skip_gate: PC client'ta Enter'la manuel tetiklenen kayıtlar
+                # için — kullanıcı zaten niyetini elle bildirdi, 'Jarvis'
+                # demesine gerek yok (yazılı mesajla aynı mantık).
+                skip_gate = bool(msg.get("skip_gate"))
+                in_followup = time.time() < followup_until.get(client_id, 0.0)
+                if not skip_gate and not in_followup and not matches_wake_word(transcript):
+                    # 'ignored' ayrı bir mesaj tipi: durum makinesini (idle)
+                    # bozmadan istemciye 'duydum ama sana değildi' geri bildirimi
+                    # verir — kullanıcı 'anladı mı anlamadı mı' diye kafası
+                    # karışmasın diye (Egemen'in isteği, 22 Tem 2026).
+                    await manager.send(client_id, {"type": "ignored", "data": transcript})
+                    await manager.send(client_id, {"type": "status", "data": "idle"})
+                    continue
+
+                await manager.send(client_id, {"type": "transcript", "data": transcript})
                 await _process_message(client_id, transcript, brain, tts, executor)
+                followup_until[client_id] = time.time() + FOLLOWUP_WINDOW
 
             # ── Yazılı giriş ─────────────────────────────────────────────────
             elif msg_type == "text":

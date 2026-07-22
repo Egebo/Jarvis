@@ -20,7 +20,6 @@ import logging
 import struct
 import sys
 import threading
-import time
 import uuid
 import wave
 import io
@@ -51,8 +50,10 @@ SILENCE_THRESHOLD = 600    # RMS eşiği — daha düşük = daha hassas
 SILENCE_DURATION = 1.2     # Bu kadar sessizlik → kayıt bitti
 MAX_RECORD_SECONDS = 12    # Maksimum kayıt süresi
 
-WAKE_WORD = "jarvis"       # Tetikleyici kelime (basit string match)
-FOLLOWUP_WINDOW = 8.0      # Yanıttan sonra bu süre içinde wake word GEREKMEZ
+# 'Jarvis' geçiyor mu kontrolü artık SUNUCUDA yapılıyor (backend/core/
+# wakeword.py) — hem PC hem web istemcisi aynı mantığı kullansın diye.
+# Client burada sadece "ne zaman kaydedileceğine" karar verir.
+from backend.config import WAKE_WORD
 
 
 # ─── Ses Yardımcıları ────────────────────────────────────────────────────────
@@ -105,7 +106,6 @@ class JarvisPCClient:
         self.is_active = False      # Wake word sonrası aktif mi?
         self.state = "idle"         # idle | listening | thinking | speaking
         self._recv_task = None
-        self.followup_until = 0.0   # Bu zamana kadar wake word'süz dinle
         self._playing = False       # Hoparlörden yanıt çalınıyor mu?
         # Kalibrasyonla güncellenir (calibrate_noise)
         self.start_threshold = SILENCE_THRESHOLD
@@ -124,9 +124,9 @@ class JarvisPCClient:
             play_audio_bytes(audio)
             if self._audio_queue.empty():
                 self._playing = False
-                # Yanıt bitti → takip penceresi: kısa süre wake word'süz dinle
-                self.followup_until = time.time() + FOLLOWUP_WINDOW
-                print(f"🎧 Dinlemedeyim ({FOLLOWUP_WINDOW:.0f}sn 'Jarvis' demeden konuşabilirsin)")
+                # Takip penceresi artık sunucuda tutuluyor (backend/config.py
+                # FOLLOWUP_WINDOW) — burası sadece bilgilendirme yapıyor.
+                print("🎧 Dinliyorum ('Jarvis' demeden de devam edebilirsin)")
 
     def interrupt_playback(self):
         """Barge-in: çalan sesi kes, kuyruktaki bekleyenleri at."""
@@ -142,7 +142,6 @@ class JarvisPCClient:
         except Exception:
             pass
         self._playing = False
-        self.followup_until = 0.0
 
     # ── Bağlantı ─────────────────────────────────────────────────────────────
     async def connect(self):
@@ -192,6 +191,9 @@ class JarvisPCClient:
             # Kuyruğa ekle — çalma thread'i sırayla çalar
             self._audio_queue.put(audio_bytes)
 
+        elif mtype == "ignored":
+            print(f"\n🙉 (duydum ama 'Jarvis' demedin, yok saydım: '{msg['data']}')")
+
         elif mtype == "error":
             log.error(f"Sunucu hatası: {msg['data']}")
 
@@ -238,32 +240,6 @@ class JarvisPCClient:
 
         return b"".join(frames)
 
-    _wake_model = None
-
-    def _get_wake_model(self):
-        """Wake word için tiny Whisper modelini BİR KEZ yükle (her turda değil)."""
-        if JarvisPCClient._wake_model is None:
-            import whisper
-            log.info("🎙️  Wake word modeli yükleniyor (tiny)...")
-            JarvisPCClient._wake_model = whisper.load_model("tiny")
-            log.info("✅ Wake word modeli hazır")
-        return JarvisPCClient._wake_model
-
-    @staticmethod
-    def _matches_wake_word(text: str) -> bool:
-        """
-        Whisper 'Jarvis'i Türkçe modunda türlü şekillerde yazabiliyor
-        (carvis, çarvış, jarvıs...). Birebir eşleşme yerine bulanık eşleşme yap.
-        """
-        from difflib import SequenceMatcher
-        text = text.lower().replace("ı", "i").replace("ş", "s").replace("ç", "c")
-        if WAKE_WORD in text:
-            return True
-        for word in text.replace(",", " ").replace(".", " ").split():
-            if SequenceMatcher(None, word, WAKE_WORD).ratio() >= 0.65:
-                return True
-        return False
-
     def calibrate_noise(self):
         """
         1.5 saniye ortam sesi dinleyip eşikleri mikrofona göre ayarla.
@@ -287,28 +263,12 @@ class JarvisPCClient:
         log.info(f"🎚️  Mikrofon kalibrasyonu: ortam={ambient:.0f}, "
                  f"başlama eşiği={self.start_threshold:.0f}, bitiş eşiği={self.end_threshold:.0f}")
 
-    def _transcribe_tiny(self, pcm: bytes) -> str:
-        """Lokal tiny model ile hızlı transkripsiyon (sadece wake word kontrolü için)."""
-        import tempfile, os
-        model = self._get_wake_model()
-        wav = pcm_to_wav(pcm)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(wav)
-            tmp = f.name
-        try:
-            result = model.transcribe(tmp, language="tr", fp16=False,
-                                      initial_prompt="Jarvis")
-            return result["text"].lower().strip()
-        finally:
-            os.unlink(tmp)
-
-    def wait_for_command(self, followup: bool = False) -> bytes | None:
+    def wait_for_command(self) -> bytes | None:
         """
-        Tek nefeste komut akışı:
-        Ses başlayana kadar bekle → konuşmanın TAMAMINI kaydet →
-        'Jarvis' ile başlıyorsa/içeriyorsa tüm kaydı döndür (komut dahil).
-        followup=True ise (yanıttan hemen sonraki pencere) wake word ARANMAZ —
-        duyulan her anlamlı konuşma doğrudan gönderilir.
+        Ses başlayana kadar bekle (en fazla 10sn, yoksa çağıran tekrar dener) →
+        konuşmanın TAMAMINI kaydet → ham PCM döndür.
+        'Jarvis' geçip geçmediğine artık SUNUCU karar veriyor (backend/core/
+        wakeword.py) — burada sadece ne zaman kayıt başlayıp biteceği belirlenir.
         """
         import collections
 
@@ -326,11 +286,7 @@ class JarvisPCClient:
             preroll = collections.deque(maxlen=int(0.5 * SAMPLE_RATE / CHUNK))
             waited_chunks = 0
             voiced_streak = 0
-            # Takip modunda pencere bitince çık; normalde 10s'de bir döngüye dön
-            if followup:
-                max_wait_chunks = int(max(0.5, self.followup_until - time.time()) * SAMPLE_RATE / CHUNK)
-            else:
-                max_wait_chunks = int(10 * SAMPLE_RATE / CHUNK)
+            max_wait_chunks = int(10 * SAMPLE_RATE / CHUNK)
             while True:
                 data = stream.read(CHUNK, exception_on_overflow=False)
                 preroll.append(data)
@@ -364,18 +320,7 @@ class JarvisPCClient:
             stream.stop_stream()
             stream.close()
 
-        # 3) Wake word / içerik kontrolü
-        pcm = b"".join(frames)
-        try:
-            text = self._transcribe_tiny(pcm)
-            log.debug(f"Duyulan: '{text}'")
-            if followup and len(text) > 1:
-                return pcm          # takip penceresi: wake word gerekmez
-            if self._matches_wake_word(text):
-                return pcm
-        except Exception as e:
-            log.debug(f"Wake word STT hatası: {e}")
-        return None
+        return b"".join(frames)
 
     # ── Ana Döngü ────────────────────────────────────────────────────────────
     async def run(self):
@@ -391,45 +336,35 @@ class JarvisPCClient:
         # Klavye girişi için ayrı thread
         asyncio.create_task(self._keyboard_input())
 
-        # Sürekli dinle: 'Jarvis ...' ile başlayan konuşmayı tek seferde yakala.
-        # Yanıttan sonraki kısa pencerede wake word gerekmez (takip sorusu).
-        # Jarvis konuşurken de dinler ama SADECE wake word keser (barge-in) —
-        # yoksa mikrofon kendi hoparlör sesini komut sanır.
+        # Sürekli dinle. 'Jarvis' geçip geçmediğine ve takip penceresine
+        # sunucu karar verir; burada sadece ses algılanınca kaydedip yollarız.
+        # Jarvis konuşurken dinlemiyoruz — kesme Enter ile yapılıyor (yukarıdaki
+        # not: sesle kesme mikrofonun kendi hoparlörünü duyup karışıyordu).
         while True:
-            if self.state == "idle":
-                if self._playing:
-                    pcm = await asyncio.get_event_loop().run_in_executor(
-                        None, self.wait_for_command, False
-                    )
-                    if pcm and self._playing:
-                        print("✋ Konuşma kesildi, yeni komut gönderiliyor...")
-                        self.interrupt_playback()
-                        self._beep()
-                        await self._send_audio(pcm)
-                    elif pcm:
-                        print("⚡ Komut algılandı, gönderiliyor...")
-                        self._beep()
-                        await self._send_audio(pcm)
-                else:
-                    followup = time.time() < self.followup_until
-                    pcm = await asyncio.get_event_loop().run_in_executor(
-                        None, self.wait_for_command, followup
-                    )
-                    if pcm:
-                        print("⚡ Komut algılandı, gönderiliyor...")
-                        self._beep()
-                        await self._send_audio(pcm)
+            if self.state == "idle" and not self._playing:
+                pcm = await asyncio.get_event_loop().run_in_executor(
+                    None, self.wait_for_command
+                )
+                if pcm:
+                    print("⚡ Komut gönderiliyor...")
+                    self._beep()
+                    await self._send_audio(pcm)
             else:
                 await asyncio.sleep(0.1)
 
-    async def _send_audio(self, pcm: bytes):
-        """Ham PCM kaydı WAV olarak sunucuya gönder."""
+    async def _send_audio(self, pcm: bytes, skip_gate: bool = False):
+        """
+        Ham PCM kaydı WAV olarak sunucuya gönder.
+        skip_gate: Enter'la manuel tetiklenen kayıtlarda True — kullanıcı
+        niyetini zaten elle bildirdi, sunucu 'Jarvis' aramasın.
+        """
         wav_bytes = pcm_to_wav(pcm)
         audio_b64 = base64.b64encode(wav_bytes).decode()
         if self.ws:
             await self.ws.send(json.dumps({
                 "type": "audio",
-                "data": audio_b64
+                "data": audio_b64,
+                "skip_gate": skip_gate,
             }))
 
     async def _handle_voice_activation(self):
@@ -438,13 +373,20 @@ class JarvisPCClient:
         pcm = await asyncio.get_event_loop().run_in_executor(
             None, self.record_until_silence
         )
-        await self._send_audio(pcm)
+        await self._send_audio(pcm, skip_gate=True)
 
     async def _keyboard_input(self):
-        """Enter'a basınca manuel aktivasyon."""
+        """
+        Enter'a basınca manuel aktivasyon. Jarvis konuşurken basılırsa önce
+        sesli kesme (barge-in) mikrofonun kendi hoparlörünü duyup karışması
+        yüzünden güvenilir değil — Enter burada garantili, anında kesme sağlar.
+        """
         loop = asyncio.get_event_loop()
         while True:
             await loop.run_in_executor(None, input)
+            if self._playing:
+                print("✋ Enter'a basıldı, konuşma kesiliyor...")
+                self.interrupt_playback()
             if self.state == "idle":
                 await self._handle_voice_activation()
 

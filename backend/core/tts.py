@@ -14,7 +14,7 @@ import threading
 import time
 import wave
 from backend.config import (TTS_ENGINE, TTS_RATE, TTS_VOLUME, EDGE_TTS_VOICE,
-                              EDGE_TTS_RATE,
+                              EDGE_TTS_RATE, TTS_SPEED,
                               GEMINI_API_KEY, GEMINI_TTS_MODEL, GEMINI_TTS_VOICE,
                               GEMINI_TTS_STYLE,
                               ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID)
@@ -46,7 +46,18 @@ class TextToSpeech:
     async def synthesize(self, text: str) -> bytes:
         """
         Metni ses verisine çevirir (WAV bytes döndürür).
+        Hangi motor konuşursa konuşsun, sonunda TTS_SPEED uygulanır.
         """
+        wav = await self._synthesize_raw(text)
+        if TTS_SPEED != 1.0:
+            loop = asyncio.get_event_loop()
+            try:
+                wav = await loop.run_in_executor(None, self._speed_up, wav, TTS_SPEED)
+            except Exception as e:
+                print(f"⚠️ Hız ayarı uygulanamadı ({e}), normal hızda çalınacak")
+        return wav
+
+    async def _synthesize_raw(self, text: str) -> bytes:
         if self.engine_name == "elevenlabs" and ELEVENLABS_API_KEY:
             return await self._elevenlabs(text)
         if self.engine_name == "gemini" and time.time() >= self._gemini_blocked_until:
@@ -67,6 +78,24 @@ class TextToSpeech:
             except Exception as e:
                 print(f"⚠️ Edge TTS hatası ({e}), pyttsx3'e düşülüyor")
         return await self._pyttsx3(text)
+
+    @staticmethod
+    def _speed_up(wav_bytes: bytes, speed: float) -> bytes:
+        """ffmpeg'in atempo filtresiyle perdeyi bozmadan hızlandırır (0.5-2.0 aralığı)."""
+        proc = subprocess.run(
+            ["ffmpeg", "-i", "pipe:0", "-filter:a", f"atempo={speed}",
+             "-f", "s16le", "-acodec", "pcm_s16le", "-ar", "24000", "-ac", "1", "pipe:1"],
+            input=wav_bytes, capture_output=True
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr[-200:].decode(errors="ignore"))
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(proc.stdout)
+        return buf.getvalue()
 
     async def _gemini(self, text: str) -> bytes:
         """Gemini TTS — stil yönlendirmeli, doğal tonlamalı ses (WAV döndürür)."""
