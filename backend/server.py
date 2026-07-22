@@ -54,6 +54,30 @@ async def lifespan(app: FastAPI):
     app.state.stt.load()
     app.state.tts = TextToSpeech()
     app.state.executor = SkillExecutor()
+
+    from backend.core.task_manager import TaskManager
+
+    async def task_event(event_type: str, message: str):
+        """Görev olaylarını tüm clientlara duyur + sesli oku."""
+        await manager.broadcast({"type": "task_update",
+                                 "data": {"event": event_type, "message": message}})
+        speech = {
+            "started": f"Görev alındı: {message}",
+            "approval_request": f"Onayına ihtiyacım var efendim: {message}. Onaylıyor musun?",
+            "done": message,
+            "failed": message,
+        }.get(event_type)
+        if speech:
+            await manager.broadcast({"type": "response", "data": speech})
+            sentences = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", speech) if s.strip()] or [speech]
+            for sentence in sentences:
+                audio_bytes = await app.state.tts.synthesize(sentence)
+                await manager.broadcast({"type": "audio",
+                                         "data": base64.b64encode(audio_bytes).decode()})
+
+    app.state.task_manager = TaskManager(event_cb=task_event)
+    app.state.executor.task_manager = app.state.task_manager
+
     log.info("✅ Jarvis hazır! Bağlantı bekleniyor...")
     yield
     log.info("👋 Jarvis kapatılıyor...")
@@ -141,6 +165,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     continue
 
                 await manager.send(client_id, {"type": "transcript", "data": transcript})
+
+                tm = app.state.task_manager
+                if tm.waiting_approval:
+                    ack = await tm.handle_utterance(transcript)
+                    if ack:
+                        await _speak_short(client_id, ack)
+                        continue
+
                 await _process_message(client_id, transcript, brain, tts, executor)
 
             # ── Yazılı giriş ─────────────────────────────────────────────────
@@ -148,6 +180,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 text = msg.get("data", "").strip()
                 if text:
                     log.info(f"💬 [{client_id}] '{text}'")
+
+                    tm = app.state.task_manager
+                    if tm.waiting_approval:
+                        ack = await tm.handle_utterance(text)
+                        if ack:
+                            await _speak_short(client_id, ack)
+                            continue
+
                     await _process_message(client_id, text, brain, tts, executor)
 
             # ── Hafıza sıfırlama ─────────────────────────────────────────────
@@ -162,6 +202,16 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         log.error(f"❌ [{client_id}] Hata: {e}", exc_info=True)
         await manager.send(client_id, {"type": "error", "data": str(e)})
         manager.disconnect(client_id)
+
+
+async def _speak_short(client_id: str, text: str):
+    """Kısa onay yanıtı: metin + tek parça ses."""
+    await manager.send(client_id, {"type": "response", "data": text})
+    tts: TextToSpeech = app.state.tts
+    audio_bytes = await tts.synthesize(text)
+    await manager.send(client_id, {"type": "audio",
+                                   "data": base64.b64encode(audio_bytes).decode()})
+    await manager.send(client_id, {"type": "status", "data": "idle"})
 
 
 async def _process_message(
