@@ -18,6 +18,7 @@ class SkillExecutor:
 
     def __init__(self):
         self._search_client = None
+        self.task_manager = None   # server.py lifespan'de set edilir
 
     async def execute(self, tool_name: str, tool_input: Dict) -> str:
         handlers = {
@@ -32,6 +33,8 @@ class SkillExecutor:
             "get_weather": self.get_weather,
             "control_media": self.control_media,
             "take_screenshot": self.take_screenshot,
+            "start_task": self.start_task,
+            "task_status": self.task_status,
         }
 
         handler = handlers.get(tool_name)
@@ -42,6 +45,26 @@ class SkillExecutor:
             return await handler(**tool_input)
         except Exception as e:
             return f"Araç hatası ({tool_name}): {str(e)}"
+
+    # ─── Görev Ajanı köprüsü ─────────────────────────────────────────────────
+    async def start_task(self, description: str) -> str:
+        if self.task_manager is None:
+            return "Görev sistemi henüz hazır değil."
+        from backend.config import WORKSPACE_DIR
+        from backend.core.agent import TaskAgent
+        from backend.skills.file_tools import FileTools
+
+        def runner_factory(tm):
+            agent = TaskAgent(description, FileTools(WORKSPACE_DIR), executor=self,
+                              approval_cb=tm.request_approval)
+            return agent.run()
+
+        return self.task_manager.start(description, runner_factory)
+
+    async def task_status(self) -> str:
+        if self.task_manager is None:
+            return "Görev sistemi henüz hazır değil."
+        return self.task_manager.status_text()
 
     # ─── Web Arama ───────────────────────────────────────────────────────────
     async def web_search(self, query: str) -> str:
