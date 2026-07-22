@@ -31,6 +31,8 @@ Temel kurallar:
 - "Yapıyorum efendim", "Anlaşıldı" gibi kısa onaylar kullan
 - Egemen'in tercihlerini ve alışkanlıklarını zamanla öğren ve hatırla
 - Bilgisayar komutlarını, sistem bilgilerini ve interneti kullanabilirsin
+- Arka plan görevi hakkında soru gelirse (bitti mi, ne durumda) MUTLAKA
+  task_status aracını çağır; görev durumu hakkında ASLA tahmin yürütme
 - Samimi ve biraz mizahlı ol — robot gibi konuşma
 """
 
@@ -45,6 +47,7 @@ GEMINI_TTS_STYLE = os.getenv(
     "akıcı ve hafif hızlı bir tempoyla oku"
 )
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "tr-TR-AhmetNeural")  # ücretsiz nöral Türkçe ses
+EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+15%")     # Edge konuşma hızı ("+0%" = normal)
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam voice
 TTS_RATE = int(os.getenv("TTS_RATE", "175"))           # Konuşma hızı (pyttsx3)
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "0.9"))
@@ -67,3 +70,12 @@ CHUNK_SIZE = 1024
 RECORD_SECONDS = 8          # Maksimum kayıt süresi
 SILENCE_THRESHOLD = 500     # Sessizlik algılama eşiği
 SILENCE_DURATION = 1.5      # Bu kadar sessizlik = konuşma bitti
+
+# ─── Görev Ajanı ────────────────────────────────────────────────────────────
+from pathlib import Path
+
+AGENT_MODEL = os.getenv("AGENT_MODEL", "gemini-3.5-flash")  # görev ajanı (sohbet: GEMINI_MODEL)
+WORKSPACE_DIR = Path(os.getenv("JARVIS_WORKSPACE",
+                               str(Path.home() / "Desktop" / "Jarvis-Workspace")))
+APPROVAL_TIMEOUT = float(os.getenv("APPROVAL_TIMEOUT", "120"))  # sn; dolarsa RED
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "25"))

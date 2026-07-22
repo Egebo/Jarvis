@@ -81,6 +81,24 @@ Kullanıcı: "Jarvis, dinozorları araştır, rapor hazırla"
    görevi ile approval akışı test edilir.
 3. **Canlı sesli test:** Araştırma+rapor görevi ve onay gerektiren bir dosya görevi, Egemen'le.
 
+## Uygulama sırasında alınan kararlar (22 Tem 2026, Egemen onaylı)
+
+- **Onay kelime kuralı güncellendi:** Onay kelimeleri (evet/onayla/onaylıyorum/yap/tamam)
+  yalnızca 3 kelime ve daha kısa cümlelerde onay sayılır; uzun cümledeki "tamam"
+  yanlış onay üretmez. Red kelimeleri her uzunlukta geçerli (yanlış red zararsız).
+- **Onaylar yalnızca PC istemcisinden:** `pc-` önekli client kimlikleri dışından
+  gelen konuşmalar onay/red sayılmaz (ağdaki başka cihaz kendi görevini onaylayamaz).
+  Kalıcı çözüm konuşmacı tanıma fazında.
+- **Hassas dosya koruması:** `.env`, `.git`, `.ssh`, anahtar/kimlik dosyaları
+  read_file ile okunmaz (prompt injection yoluyla sızdırma riskine karşı).
+- **Tek başlangıç anonsu:** "started" olayı sesli okunmaz; başlangıç duyurusu sohbet
+  beyninin ilettiği "Başlıyorum efendim" mesajıdır (çift anons önlenir).
+- **Kısmî sonuç:** Görev yarıda kalırsa birikmiş içerik `kismi-sonuc-<zaman>.md`
+  olarak workspace'e yazılır ve sesli bildirilir (spec'in verdiği söz uygulandı).
+- **Takip penceresi mekanizması notu:** Onay sorusundan sonra wake word'süz cevap
+  verme, PC client'ın mevcut ses kuyruğu bitişinde açılan takip penceresiyle sağlanır;
+  client yeniden yazılırsa bu davranış korunmalı.
+
 ## Kapsam dışı (bilinçli)
 
 - Birden fazla eşzamanlı görev, görev kalıcılığı (Faz 2), proaktif tetikleme (Faz 3),

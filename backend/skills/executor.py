@@ -18,6 +18,7 @@ class SkillExecutor:
 
     def __init__(self):
         self._search_client = None
+        self.task_manager = None   # server.py lifespan'de set edilir
 
     async def execute(self, tool_name: str, tool_input: Dict) -> str:
         handlers = {
@@ -31,7 +32,10 @@ class SkillExecutor:
             "set_reminder": self.set_reminder,
             "get_weather": self.get_weather,
             "control_media": self.control_media,
+            "get_now_playing": self.get_now_playing,
             "take_screenshot": self.take_screenshot,
+            "start_task": self.start_task,
+            "task_status": self.task_status,
         }
 
         handler = handlers.get(tool_name)
@@ -42,6 +46,26 @@ class SkillExecutor:
             return await handler(**tool_input)
         except Exception as e:
             return f"Araç hatası ({tool_name}): {str(e)}"
+
+    # ─── Görev Ajanı köprüsü ─────────────────────────────────────────────────
+    async def start_task(self, description: str) -> str:
+        if self.task_manager is None:
+            return "Görev sistemi henüz hazır değil."
+        from backend.config import WORKSPACE_DIR
+        from backend.core.agent import TaskAgent
+        from backend.skills.file_tools import FileTools
+
+        def runner_factory(tm):
+            agent = TaskAgent(description, FileTools(WORKSPACE_DIR), executor=self,
+                              approval_cb=tm.request_approval)
+            return agent.run()
+
+        return self.task_manager.start(description, runner_factory)
+
+    async def task_status(self) -> str:
+        if self.task_manager is None:
+            return "Görev sistemi henüz hazır değil."
+        return self.task_manager.status_text()
 
     # ─── Web Arama ───────────────────────────────────────────────────────────
     async def web_search(self, query: str) -> str:
@@ -260,6 +284,38 @@ class SkillExecutor:
 
         pyautogui.press(key)
         return f"✅ {action} yapıldı."
+
+    # ─── Çalan Medya + Açık Pencereler ───────────────────────────────────────
+    async def get_now_playing(self) -> str:
+        """Windows medya oturumundan çalan içeriği + açık pencere başlıklarını okur."""
+        parts = []
+        try:
+            from winrt.windows.media.control import (
+                GlobalSystemMediaTransportControlsSessionManager as MediaManager,
+            )
+            mgr = await MediaManager.request_async()
+            session = mgr.get_current_session()
+            if session:
+                props = await session.try_get_media_properties_async()
+                app = (session.source_app_user_model_id or "").split("!")[0].split("_")[0]
+                info = props.title or "(başlık yok)"
+                if props.artist:
+                    info += f" - {props.artist}"
+                parts.append(f"Çalan medya: {info} (uygulama: {app})")
+            else:
+                parts.append("Şu an sistemde çalan medya görünmüyor.")
+        except Exception as e:
+            parts.append(f"Medya bilgisi alınamadı: {e}")
+
+        try:
+            import pygetwindow as gw
+            titles = [t for t in gw.getAllTitles() if t.strip()][:15]
+            if titles:
+                parts.append("Açık pencereler: " + " | ".join(titles))
+        except Exception:
+            pass
+
+        return "\n".join(parts)
 
     # ─── Ekran Görüntüsü ─────────────────────────────────────────────────────
     async def take_screenshot(self) -> dict:

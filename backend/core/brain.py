@@ -35,6 +35,27 @@ class JarvisBrain:
                 }
             ),
             types.FunctionDeclaration(
+                name="start_task",
+                description=(
+                    "Çok adımlı bir işi arka plan görev ajanına devreder: araştırma+rapor, "
+                    "dosya/klasör düzenleme, özet çıkarma gibi. Kullanıcı bir 'iş' istediğinde "
+                    "bunu kullan; basit soru-cevap için KULLANMA. Dönen mesajı kullanıcıya aynen söyle."
+                ),
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {
+                        "description": {"type": "string",
+                                        "description": "Görevin tam tanımı, kullanıcının isteğindeki tüm detaylarla"}
+                    },
+                    "required": ["description"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="task_status",
+                description="Arka plandaki görevin durumunu sorar ('görev ne durumda' gibi sorularda).",
+                parameters_json_schema={"type": "object", "properties": {}, "required": []}
+            ),
+            types.FunctionDeclaration(
                 name="open_application",
                 description="Bilgisayarda bir uygulama veya dosya açar.",
                 parameters_json_schema={
@@ -114,8 +135,21 @@ class JarvisBrain:
                 }
             ),
             types.FunctionDeclaration(
+                name="get_now_playing",
+                description=(
+                    "Şu an çalan müzik/video adını ve açık pencere başlıklarını verir. "
+                    "'Ne izliyorum', 'ne dinliyorum', 'bu şarkı ne' sorularında ÖNCE bunu kullan. "
+                    "Netflix gibi DRM'li uygulamalar içerik adını gizler; o durumda dürüstçe söyle."
+                ),
+                parameters_json_schema={"type": "object", "properties": {}, "required": []}
+            ),
+            types.FunctionDeclaration(
                 name="take_screenshot",
-                description="Ekran görüntüsü alır ve içeriğini analiz eder.",
+                description=(
+                    "Ekran görüntüsü alır ve içeriğini analiz eder. "
+                    "NOT: Netflix gibi DRM korumalı videolar görüntüde SİYAH çıkar; "
+                    "'ne izliyorum' için get_now_playing kullan."
+                ),
                 parameters_json_schema={
                     "type": "object",
                     "properties": {},

@@ -43,24 +43,28 @@ class SpeechToText:
         try:
             result = self._model.transcribe(
                 tmp_path,
-                language=STT_LANGUAGE,
+                # "auto"/boş → Whisper dili kendisi algılar (Türkçe, İngilizce...)
+                # NOT: dil zorlamak + initial_prompt, yabancı dilde halüsinasyon
+                # döngüsüne sokuyordu (22 Tem canlı testi) — ikisi de kaldırıldı
+                language=self._language(),
                 fp16=(self._device == "cuda"),
                 condition_on_previous_text=False,
-                # "Jarvis" gibi özel isimleri doğru yazması için modeli yönlendir
-                initial_prompt="Jarvis adlı sesli asistanla Türkçe konuşma."
             )
             text = result["text"].strip()
             return text
         finally:
             os.unlink(tmp_path)
 
+    @staticmethod
+    def _language():
+        return None if STT_LANGUAGE in ("", "auto") else STT_LANGUAGE
+
     async def transcribe_file(self, file_path: str) -> str:
         self.load()
         result = self._model.transcribe(
             file_path,
-            language=STT_LANGUAGE,
+            language=self._language(),
             fp16=(self._device == "cuda"),
-            initial_prompt="Jarvis adlı sesli asistanla Türkçe konuşma."
         )
         return result["text"].strip()
 

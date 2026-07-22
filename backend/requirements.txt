@@ -19,3 +19,8 @@ psutil>=5.9.0
 pyautogui>=0.9.54
 pillow>=10.0.0
 pyscreeze>=0.1.30
+pygetwindow>=0.0.9
+winrt-runtime; sys_platform == 'win32'
+winrt-Windows.Media.Control; sys_platform == 'win32'
+winrt-Windows.Foundation; sys_platform == 'win32'
+winrt-Windows.Storage.Streams; sys_platform == 'win32'
