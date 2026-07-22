@@ -67,3 +67,12 @@ CHUNK_SIZE = 1024
 RECORD_SECONDS = 8          # Maksimum kayıt süresi
 SILENCE_THRESHOLD = 500     # Sessizlik algılama eşiği
 SILENCE_DURATION = 1.5      # Bu kadar sessizlik = konuşma bitti
+
+# ─── Görev Ajanı ────────────────────────────────────────────────────────────
+from pathlib import Path
+
+AGENT_MODEL = os.getenv("AGENT_MODEL", "gemini-3.5-flash")  # görev ajanı (sohbet: GEMINI_MODEL)
+WORKSPACE_DIR = Path(os.getenv("JARVIS_WORKSPACE",
+                               str(Path.home() / "Desktop" / "Jarvis-Workspace")))
+APPROVAL_TIMEOUT = float(os.getenv("APPROVAL_TIMEOUT", "120"))  # sn; dolarsa RED
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "25"))
