@@ -85,6 +85,8 @@ Ayarlar ekranından PC'nizin yerel IP'sini girin.
 | PC client | ✅ |
 | Mobil (React Native) | ✅ |
 | Konuşma hafızası | ✅ |
+| Arka plan görev ajanı (araştırma+rapor, dosya işleri) | ✅ |
+| Riskli adımlarda sesli onay | ✅ |
 
 ## Gelişmiş TTS
 
@@ -94,6 +96,15 @@ Yüksek kalite için ElevenLabs:
 ELEVENLABS_API_KEY=your_key
 TTS_ENGINE=elevenlabs
 ```
+
+## Görev Ajanı
+
+"Jarvis, dinozorları araştır ve masaüstündeki klasöre rapor yaz" gibi çok adımlı
+işler arka planda çalışan görev ajanına devredilir; sen bu sırada Jarvis'le
+konuşmaya devam edebilirsin. Çıktılar `Masaüstü/Jarvis-Workspace/` klasörüne yazılır.
+Riskli adımlarda (silme, taşıma, workspace dışına yazma, komut çalıştırma) Jarvis
+sesli onay ister; kısa bir "evet" veya "hayır" yeterlidir (yalnızca PC istemcisinden).
+Detaylı tasarım: `docs/superpowers/specs/2026-07-22-gorev-ajani-design.md`
 
 ## Yeni Yetenek Eklemek
 
