@@ -204,6 +204,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await manager.send(client_id, {"type": "transcript", "data": transcript})
                 await _process_message(client_id, transcript, brain, tts, executor)
                 followup_until[client_id] = time.time() + FOLLOWUP_WINDOW
+                # İstemciye takip penceresinin açıldığını bildir — bu olmadan
+                # istemci (web arayüzü/PC client) gerçekte 'Jarvis' demeden
+                # konuşulabilecek bir an olduğunu bilemiyordu, hep aynı sabit
+                # metni gösteriyordu (Egemen'in bulduğu sorun, 23 Tem 2026).
+                await manager.send(client_id, {"type": "followup", "data": FOLLOWUP_WINDOW})
 
             # ── Yazılı giriş ─────────────────────────────────────────────────
             elif msg_type == "text":
