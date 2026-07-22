@@ -32,6 +32,7 @@ class SkillExecutor:
             "set_reminder": self.set_reminder,
             "get_weather": self.get_weather,
             "control_media": self.control_media,
+            "get_now_playing": self.get_now_playing,
             "take_screenshot": self.take_screenshot,
             "start_task": self.start_task,
             "task_status": self.task_status,
@@ -283,6 +284,38 @@ class SkillExecutor:
 
         pyautogui.press(key)
         return f"✅ {action} yapıldı."
+
+    # ─── Çalan Medya + Açık Pencereler ───────────────────────────────────────
+    async def get_now_playing(self) -> str:
+        """Windows medya oturumundan çalan içeriği + açık pencere başlıklarını okur."""
+        parts = []
+        try:
+            from winrt.windows.media.control import (
+                GlobalSystemMediaTransportControlsSessionManager as MediaManager,
+            )
+            mgr = await MediaManager.request_async()
+            session = mgr.get_current_session()
+            if session:
+                props = await session.try_get_media_properties_async()
+                app = (session.source_app_user_model_id or "").split("!")[0].split("_")[0]
+                info = props.title or "(başlık yok)"
+                if props.artist:
+                    info += f" - {props.artist}"
+                parts.append(f"Çalan medya: {info} (uygulama: {app})")
+            else:
+                parts.append("Şu an sistemde çalan medya görünmüyor.")
+        except Exception as e:
+            parts.append(f"Medya bilgisi alınamadı: {e}")
+
+        try:
+            import pygetwindow as gw
+            titles = [t for t in gw.getAllTitles() if t.strip()][:15]
+            if titles:
+                parts.append("Açık pencereler: " + " | ".join(titles))
+        except Exception:
+            pass
+
+        return "\n".join(parts)
 
     # ─── Ekran Görüntüsü ─────────────────────────────────────────────────────
     async def take_screenshot(self) -> dict:

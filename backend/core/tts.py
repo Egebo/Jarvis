@@ -14,6 +14,7 @@ import threading
 import time
 import wave
 from backend.config import (TTS_ENGINE, TTS_RATE, TTS_VOLUME, EDGE_TTS_VOICE,
+                              EDGE_TTS_RATE,
                               GEMINI_API_KEY, GEMINI_TTS_MODEL, GEMINI_TTS_VOICE,
                               GEMINI_TTS_STYLE,
                               ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID)
@@ -104,7 +105,7 @@ class TextToSpeech:
         """Edge TTS ile nöral Türkçe ses üretir (MP3 → WAV çevrilir)."""
         import edge_tts
 
-        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=EDGE_TTS_RATE)
         mp3_data = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
@@ -119,13 +120,23 @@ class TextToSpeech:
 
     @staticmethod
     def _mp3_to_wav(mp3_data: bytes) -> bytes:
+        # ffmpeg pipe'a WAV yazarken RIFF boyut alanlarını dolduramıyor (seek yok);
+        # winsound/SoundPlayer böyle başlığı reddediyor ve client sessiz kalıyordu.
+        # Ham PCM alıp WAV başlığını burada düzgün yazıyoruz.
         proc = subprocess.run(
-            ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", "24000", "-ac", "1", "pipe:1"],
+            ["ffmpeg", "-i", "pipe:0", "-f", "s16le", "-acodec", "pcm_s16le",
+             "-ar", "24000", "-ac", "1", "pipe:1"],
             input=mp3_data, capture_output=True
         )
         if proc.returncode != 0:
             raise RuntimeError(f"ffmpeg dönüşüm hatası: {proc.stderr[-200:].decode(errors='ignore')}")
-        return proc.stdout
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(proc.stdout)
+        return buf.getvalue()
 
     async def speak(self, text: str):
         """

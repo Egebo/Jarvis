@@ -77,20 +77,23 @@ def pcm_to_wav(pcm: bytes, rate: int = SAMPLE_RATE) -> bytes:
 
 
 def play_audio_bytes(audio_bytes: bytes):
-    """WAV veya MP3 bytes'ı hoparlörden çal."""
+    """WAV bytes'ı hoparlörden çal (winsound: bellekten, süreç açmadan)."""
     try:
-        # playsound veya simpleaudio ile çal
-        import tempfile, os
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(audio_bytes)
-            tmp = f.name
-        # Windows
-        import subprocess
-        subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer '{tmp}').PlaySync()"],
-                       capture_output=True)
-        os.unlink(tmp)
+        import winsound
+        winsound.PlaySound(audio_bytes, winsound.SND_MEMORY)
     except Exception as e:
-        log.warning(f"Ses çalma hatası: {e}")
+        log.warning(f"Ses çalma hatası (winsound): {e}")
+        # Yedek: eski PowerShell SoundPlayer yolu
+        try:
+            import tempfile, os, subprocess
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(audio_bytes)
+                tmp = f.name
+            subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer '{tmp}').PlaySync()"],
+                           capture_output=True)
+            os.unlink(tmp)
+        except Exception as e2:
+            log.error(f"Ses çalma tamamen başarısız: {e2}")
 
 
 # ─── Ana Client Sınıfı ───────────────────────────────────────────────────────
@@ -115,6 +118,8 @@ class JarvisPCClient:
         """Ses parçalarını sırayla çal (cümle cümle gelirler, üst üste binmesinler)."""
         while True:
             audio = self._audio_queue.get()
+            if audio is None:          # interrupt_playback'in bıraktığı boş işaret
+                continue
             self._playing = True
             play_audio_bytes(audio)
             if self._audio_queue.empty():
@@ -123,13 +128,32 @@ class JarvisPCClient:
                 self.followup_until = time.time() + FOLLOWUP_WINDOW
                 print(f"🎧 Dinlemedeyim ({FOLLOWUP_WINDOW:.0f}sn 'Jarvis' demeden konuşabilirsin)")
 
+    def interrupt_playback(self):
+        """Barge-in: çalan sesi kes, kuyruktaki bekleyenleri at."""
+        import queue as _q
+        try:
+            while True:
+                self._audio_queue.get_nowait()
+        except _q.Empty:
+            pass
+        try:
+            import winsound
+            winsound.PlaySound(None, winsound.SND_PURGE)   # çalanı durdur
+        except Exception:
+            pass
+        self._playing = False
+        self.followup_until = 0.0
+
     # ── Bağlantı ─────────────────────────────────────────────────────────────
     async def connect(self):
         url = f"{SERVER_URL}/{CLIENT_ID}"
         log.info(f"🔗 Sunucuya bağlanıyor: {url}")
         while True:
             try:
-                self.ws = await websockets.connect(url, ping_interval=30)
+                # max_size: uzun yanıtların ses parçaları 1MB varsayılan limiti
+                # aşıp bağlantıyı sessizce düşürüyordu — ses hiç çalınmıyordu
+                self.ws = await websockets.connect(url, ping_interval=30,
+                                                   max_size=10 * 1024 * 1024)
                 log.info("✅ Bağlandı!")
                 self._recv_task = asyncio.create_task(self._receive_loop())
                 return
@@ -369,16 +393,32 @@ class JarvisPCClient:
 
         # Sürekli dinle: 'Jarvis ...' ile başlayan konuşmayı tek seferde yakala.
         # Yanıttan sonraki kısa pencerede wake word gerekmez (takip sorusu).
+        # Jarvis konuşurken de dinler ama SADECE wake word keser (barge-in) —
+        # yoksa mikrofon kendi hoparlör sesini komut sanır.
         while True:
-            if self.state == "idle" and not self._playing:
-                followup = time.time() < self.followup_until
-                pcm = await asyncio.get_event_loop().run_in_executor(
-                    None, self.wait_for_command, followup
-                )
-                if pcm:
-                    print("⚡ Komut algılandı, gönderiliyor...")
-                    self._beep()
-                    await self._send_audio(pcm)
+            if self.state == "idle":
+                if self._playing:
+                    pcm = await asyncio.get_event_loop().run_in_executor(
+                        None, self.wait_for_command, False
+                    )
+                    if pcm and self._playing:
+                        print("✋ Konuşma kesildi, yeni komut gönderiliyor...")
+                        self.interrupt_playback()
+                        self._beep()
+                        await self._send_audio(pcm)
+                    elif pcm:
+                        print("⚡ Komut algılandı, gönderiliyor...")
+                        self._beep()
+                        await self._send_audio(pcm)
+                else:
+                    followup = time.time() < self.followup_until
+                    pcm = await asyncio.get_event_loop().run_in_executor(
+                        None, self.wait_for_command, followup
+                    )
+                    if pcm:
+                        print("⚡ Komut algılandı, gönderiliyor...")
+                        self._beep()
+                        await self._send_audio(pcm)
             else:
                 await asyncio.sleep(0.1)
 

@@ -31,6 +31,8 @@ Temel kurallar:
 - "Yapıyorum efendim", "Anlaşıldı" gibi kısa onaylar kullan
 - Egemen'in tercihlerini ve alışkanlıklarını zamanla öğren ve hatırla
 - Bilgisayar komutlarını, sistem bilgilerini ve interneti kullanabilirsin
+- Arka plan görevi hakkında soru gelirse (bitti mi, ne durumda) MUTLAKA
+  task_status aracını çağır; görev durumu hakkında ASLA tahmin yürütme
 - Samimi ve biraz mizahlı ol — robot gibi konuşma
 """
 
@@ -45,6 +47,7 @@ GEMINI_TTS_STYLE = os.getenv(
     "akıcı ve hafif hızlı bir tempoyla oku"
 )
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "tr-TR-AhmetNeural")  # ücretsiz nöral Türkçe ses
+EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+15%")     # Edge konuşma hızı ("+0%" = normal)
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam voice
 TTS_RATE = int(os.getenv("TTS_RATE", "175"))           # Konuşma hızı (pyttsx3)
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "0.9"))

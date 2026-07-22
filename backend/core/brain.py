@@ -135,8 +135,21 @@ class JarvisBrain:
                 }
             ),
             types.FunctionDeclaration(
+                name="get_now_playing",
+                description=(
+                    "Şu an çalan müzik/video adını ve açık pencere başlıklarını verir. "
+                    "'Ne izliyorum', 'ne dinliyorum', 'bu şarkı ne' sorularında ÖNCE bunu kullan. "
+                    "Netflix gibi DRM'li uygulamalar içerik adını gizler; o durumda dürüstçe söyle."
+                ),
+                parameters_json_schema={"type": "object", "properties": {}, "required": []}
+            ),
+            types.FunctionDeclaration(
                 name="take_screenshot",
-                description="Ekran görüntüsü alır ve içeriğini analiz eder.",
+                description=(
+                    "Ekran görüntüsü alır ve içeriğini analiz eder. "
+                    "NOT: Netflix gibi DRM korumalı videolar görüntüde SİYAH çıkar; "
+                    "'ne izliyorum' için get_now_playing kullan."
+                ),
                 parameters_json_schema={
                     "type": "object",
                     "properties": {},
