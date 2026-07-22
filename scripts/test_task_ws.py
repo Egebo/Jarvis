@@ -6,7 +6,7 @@ import websockets
 
 
 async def main():
-    async with websockets.connect("ws://localhost:8765/ws/task-test",
+    async with websockets.connect("ws://localhost:8765/ws/pc-integration-test",
                                   max_size=10 * 1024 * 1024) as ws:
         await ws.send(json.dumps({"type": "text",
             "data": "Görev: workspace'e deneme.txt adında icinde 'merhaba' yazan bir dosya olustur."}))

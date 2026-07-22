@@ -40,10 +40,6 @@ async def approve_all(desc):
     return True
 
 
-async def reject_all(desc):
-    return False
-
-
 async def test_agent_executes_tool_then_finishes(tmp_path):
     script = [
         fake_response([FakePart(function_call=FakeFC("write_file",
@@ -106,3 +102,24 @@ async def test_retry_on_transient_error(tmp_path, monkeypatch):
                       approval_cb=approve_all, generate_fn=flaky)
     assert await agent.run() == "tamam"
     assert calls["n"] == 3
+
+
+async def test_failure_saves_partial_result(tmp_path):
+    calls = {"n": 0}
+
+    async def script(contents):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return fake_response([FakePart(function_call=FakeFC("write_file",
+                                  {"path": "notlar.md", "content": "ilerleme var"}))])
+        raise ValueError("model çöktü")
+
+    agent = TaskAgent("uzun görev", FileTools(tmp_path), executor=None,
+                      approval_cb=approve_all, generate_fn=script)
+    with pytest.raises(RuntimeError) as excinfo:
+        await agent.run()
+    assert "Kısmî sonucu" in str(excinfo.value)
+    kismi_dosyalar = list(tmp_path.glob("kismi-sonuc-*.md"))
+    assert len(kismi_dosyalar) == 1
+    icerik = kismi_dosyalar[0].read_text(encoding="utf-8")
+    assert "uzun görev" in icerik

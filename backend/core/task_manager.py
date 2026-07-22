@@ -14,11 +14,17 @@ REJECT_WORDS = {"hayır", "hayir", "iptal", "yapma", "dur"}
 
 
 def parse_approval(text: str) -> bool | None:
-    """Kelime bazlı onay/red algılama. Red kelimesi varsa RED kazanır."""
-    words = set(re.findall(r"\w+", text.lower(), flags=re.UNICODE))
-    if words & REJECT_WORDS:
+    """Kelime bazlı onay/red algılama.
+    RED kelimesi varsa uzunluğa bakılmaksızın RED kazanır (Egemen kararı,
+    22 Tem 2026). APPROVE ise sadece kısa (3 kelime veya altı) ifadelerde
+    geçerli sayılır; uzun cümleler içinde geçen onay kelimeleri (ör. sohbet
+    sırasında "tamam" geçen uzun bir cümle) yanlış onaya yol açmasın diye
+    yok sayılır."""
+    words = re.findall(r"\w+", text.lower(), flags=re.UNICODE)
+    word_set = set(words)
+    if word_set & REJECT_WORDS:
         return False
-    if words & APPROVE_WORDS:
+    if len(words) <= 3 and word_set & APPROVE_WORDS:
         return True
     return None
 
@@ -52,7 +58,7 @@ class TaskManager:
             return f"Şu an zaten bir görev üzerindeyim: {self.description}. Bitince yenisini alabilirim."
         self.state = TaskState.RUNNING
         self.description = description
-        self._task = asyncio.get_event_loop().create_task(self._run(runner))
+        self._task = asyncio.get_running_loop().create_task(self._run(runner))
         return "Başlıyorum efendim, bitince haber veririm."
 
     async def _run(self, runner):
@@ -63,7 +69,7 @@ class TaskManager:
             await self._event_cb("done", summary)
         except Exception as e:
             self.state = TaskState.FAILED
-            await self._event_cb("failed", f"Görev başarısız oldu: {e}")
+            await self._event_cb("failed", f"Görev başarısız oldu: {str(e)[:150]}")
 
     def status_text(self) -> str:
         return {
@@ -83,7 +89,7 @@ class TaskManager:
         """Ajan riskli adımda çağırır. Zaman aşımı = RED (sessizlik onay değildir)."""
         self.state = TaskState.WAITING_APPROVAL
         self.pending_action = action_desc
-        self._approval_future = asyncio.get_event_loop().create_future()
+        self._approval_future = asyncio.get_running_loop().create_future()
         await self._event_cb("approval_request", action_desc)
         try:
             approved = await asyncio.wait_for(self._approval_future, timeout=self._timeout)

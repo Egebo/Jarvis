@@ -4,6 +4,7 @@ Sohbet beyninden bağımsız, daha güçlü model (AGENT_MODEL) kullanır.
 Spec: docs/superpowers/specs/2026-07-22-gorev-ajani-design.md
 """
 import asyncio
+from datetime import datetime
 
 from backend.config import AGENT_MODEL, AGENT_MAX_STEPS, GEMINI_API_KEY
 from backend.skills.file_tools import FileTools, requires_approval
@@ -71,10 +72,6 @@ class TaskAgent:
                     fr = part["function_response"]
                     sdk_parts.append(types.Part.from_function_response(
                         name=fr["name"], response=fr["response"]))
-                elif "function_call" in part:
-                    fc = part["function_call"]
-                    sdk_parts.append(types.Part(function_call=types.FunctionCall(
-                        name=fc["name"], args=fc.get("args") or {})))
                 else:
                     sdk_parts.append(types.Part(text=part.get("text", "")))
             else:
@@ -150,23 +147,72 @@ class TaskAgent:
     async def run(self) -> str:
         contents = [{"role": "user", "parts": [{"text": f"Görev: {self.description}"}]}]
 
-        for step in range(self.max_steps + 1):
-            if step == self.max_steps:
-                contents.append({"role": "user", "parts": [{
-                    "text": "Adım limitine ulaştın. Yeni araç çağırma; elindekiyle kısa sesli özetini ver."}]})
-            response = await self._generate_with_retry(contents)
-            parts = response.candidates[0].content.parts or []
-            fcs = [p.function_call for p in parts if getattr(p, "function_call", None)]
-            if not fcs or step == self.max_steps:
-                return (getattr(response, "text", "") or "Görev tamamlandı.").strip()
+        try:
+            for step in range(self.max_steps + 1):
+                if step == self.max_steps:
+                    contents.append({"role": "user", "parts": [{
+                        "text": "Adım limitine ulaştın. Yeni araç çağırma; elindekiyle kısa sesli özetini ver."}]})
+                response = await self._generate_with_retry(contents)
+                parts = response.candidates[0].content.parts or []
+                fcs = [p.function_call for p in parts if getattr(p, "function_call", None)]
+                if not fcs or step == self.max_steps:
+                    return (getattr(response, "text", "") or "Görev tamamlandı.").strip()
 
-            contents.append({"role": "model", "parts": list(parts)})
-            results = []
-            for fc in fcs:
-                args = dict(fc.args) if fc.args else {}
-                print(f"🤖🔧 Ajan aracı: {fc.name} -> {args}")
-                out = await self._exec_tool(fc.name, args)
-                results.append({"function_response": {
-                    "name": fc.name, "response": {"result": str(out)[:8000]}}})
-            contents.append({"role": "user", "parts": results})
-        return "Görev tamamlandı."
+                contents.append({"role": "model", "parts": list(parts)})
+                results = []
+                for fc in fcs:
+                    args = dict(fc.args) if fc.args else {}
+                    print(f"🤖🔧 Ajan aracı: {fc.name} -> {args}")
+                    out = await self._exec_tool(fc.name, args)
+                    results.append({"function_response": {
+                        "name": fc.name, "response": {"result": str(out)[:8000]}}})
+                contents.append({"role": "user", "parts": results})
+            return "Görev tamamlandı."
+        except Exception as e:
+            dosya_adi = self._save_partial_progress(contents, e)
+            if dosya_adi is None:
+                raise RuntimeError(f"Görev başlamadan başarısız oldu ({e}).") from e
+            raise RuntimeError(
+                f"Görev yarıda kaldı ({e}). Kısmî sonucu {dosya_adi} dosyasına kaydettim.") from e
+
+    def _save_partial_progress(self, contents, error):
+        """Sohbet geçmişinden anlamlı içerik toplayıp workspace'e kaydeder.
+        Adım 0'da (henüz hiçbir şey birikmemişken) yazacak içerik yoksa None döner."""
+        chunks = []
+        for entry in contents[1:]:  # ilk giriş sadece görev tanımı; birikmiş ilerleme sayılmaz
+            if not isinstance(entry, dict):
+                continue
+            role = entry.get("role", "?")
+            for part in entry.get("parts", []):
+                if isinstance(part, dict):
+                    if part.get("text"):
+                        chunks.append(f"[{role}] {part['text']}")
+                    elif "function_call" in part:
+                        fc = part["function_call"]
+                        chunks.append(f"[{role}] araç çağrısı: {fc.get('name')} {fc.get('args') or {}}")
+                    elif "function_response" in part:
+                        fr = part["function_response"]
+                        result = (fr.get("response") or {}).get("result", "")
+                        chunks.append(f"[araç sonucu: {fr.get('name')}]\n{result}")
+                else:
+                    # Gerçek/test amaçlı SDK Part nesnesi (model rolü, henüz dict'e çevrilmedi)
+                    text = getattr(part, "text", None)
+                    if text:
+                        chunks.append(f"[{role}] {text}")
+                    fc = getattr(part, "function_call", None)
+                    if fc:
+                        args = dict(fc.args) if getattr(fc, "args", None) else {}
+                        chunks.append(f"[{role}] araç çağrısı: {fc.name} {args}")
+
+        if not chunks:
+            return None
+
+        dosya_adi = f"kismi-sonuc-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        body = (
+            f"# Kısmî Sonuç\n\n"
+            f"Görev: {self.description}\n\n"
+            f"Hata: {error}\n\n"
+            f"## Geçmiş\n\n" + "\n\n".join(chunks)
+        )
+        self.ft.write_file(dosya_adi, body)
+        return dosya_adi

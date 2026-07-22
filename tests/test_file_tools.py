@@ -48,3 +48,25 @@ def test_approval_rules(tmp_path):
 def test_relative_traversal_requires_approval(tmp_path):
     ok, desc = requires_approval("write_file", {"path": "../kacak.txt", "content": ""}, tmp_path)
     assert ok is True and "kacak.txt" in desc
+
+
+def test_approval_description_shows_resolved_path(tmp_path):
+    ws = tmp_path
+    ok, desc = requires_approval("delete_path", {"path": "a.txt"}, ws)
+    assert ok is True
+    assert str(ws) in desc
+
+
+def test_sensitive_file_read_refused(tmp_path):
+    ft = FileTools(workspace=tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("SECRET=123", encoding="utf-8")
+    result = ft.read_file(".env")
+    assert "hassas" in result
+    assert "SECRET" not in result
+
+
+def test_normal_file_still_reads(tmp_path):
+    ft = FileTools(workspace=tmp_path)
+    ft.write_file("normal.txt", "merhaba")
+    assert ft.read_file("normal.txt") == "merhaba"

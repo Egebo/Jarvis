@@ -61,8 +61,9 @@ async def lifespan(app: FastAPI):
         """Görev olaylarını tüm clientlara duyur + sesli oku."""
         await manager.broadcast({"type": "task_update",
                                  "data": {"event": event_type, "message": message}})
+        # "started" burada seslendirilmiyor: sohbet beynindeki "Başlıyorum efendim..."
+        # zaten tek sözlü başlangıç anonsu olarak okunuyor; ikisi birden çakışmasın.
         speech = {
-            "started": f"Görev alındı: {message}",
             "approval_request": f"Onayına ihtiyacım var efendim: {message}. Onaylıyor musun?",
             "done": message,
             "failed": message,
@@ -167,7 +168,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await manager.send(client_id, {"type": "transcript", "data": transcript})
 
                 tm = app.state.task_manager
-                if tm.waiting_approval:
+                # Onaylar yalnızca PC istemcisinden (Egemen kararı, 22 Tem 2026)
+                if tm.waiting_approval and client_id.startswith("pc-"):
                     ack = await tm.handle_utterance(transcript)
                     if ack:
                         await _speak_short(client_id, ack)
@@ -182,7 +184,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     log.info(f"💬 [{client_id}] '{text}'")
 
                     tm = app.state.task_manager
-                    if tm.waiting_approval:
+                    # Onaylar yalnızca PC istemcisinden (Egemen kararı, 22 Tem 2026)
+                    if tm.waiting_approval and client_id.startswith("pc-"):
                         ack = await tm.handle_utterance(text)
                         if ack:
                             await _speak_short(client_id, ack)

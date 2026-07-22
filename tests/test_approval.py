@@ -20,3 +20,14 @@ def test_unrelated(text):
 def test_rejection_wins_when_both():
     # "yapma" içinde "yap" geçer; kelime bazlı eşleşme bunu RED saymalı
     assert parse_approval("yapma") is False
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("tamam, sonra bakarız o işi", None),           # onay kelimesi var ama uzun cümle
+    ("evet", True),
+    ("tamam yap", True),
+    ("bence de tamam ama once sunu konusalim", None),  # uzun, onay sayılmaz
+    ("hayır bence bu çok riskli bir iş olur", False),  # red her uzunlukta çalışır
+])
+def test_approve_only_short_reject_any_length(text, expected):
+    assert parse_approval(text) is expected
