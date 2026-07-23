@@ -112,14 +112,32 @@ class JarvisBrain:
             ),
             types.FunctionDeclaration(
                 name="set_reminder",
-                description="Hatırlatıcı veya alarm kurar.",
+                description=(
+                    "Hatırlatıcı kurar. Tek seferlik için 'minutes', her gün "
+                    "tekrarlayan rutin için 'daily_at' kullan (ikisi birden verilmez)."
+                ),
                 parameters_json_schema={
                     "type": "object",
                     "properties": {
                         "message": {"type": "string", "description": "Hatırlatıcı mesajı"},
-                        "minutes": {"type": "integer", "description": "Kaç dakika sonra"}
+                        "minutes": {"type": "integer", "description": "Kaç dakika sonra (tek seferlik)"},
+                        "daily_at": {"type": "string", "description": "Her gün bu saatte, 'HH:MM' formatında (örn. '09:00')"}
                     },
-                    "required": ["message", "minutes"]
+                    "required": ["message"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="list_reminders",
+                description="Aktif hatırlatıcıları listeler ('hatırlatıcılarım ne' gibi sorularda).",
+                parameters_json_schema={"type": "object", "properties": {}, "required": []}
+            ),
+            types.FunctionDeclaration(
+                name="cancel_reminder",
+                description="Bir hatırlatıcıyı iptal eder.",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "description": "İptal edilecek hatırlatıcının metni veya bir kısmı"}},
+                    "required": ["query"]
                 }
             ),
             types.FunctionDeclaration(
