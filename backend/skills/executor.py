@@ -6,7 +6,7 @@ import asyncio
 import psutil
 import subprocess
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 
@@ -20,6 +20,7 @@ class SkillExecutor:
         self._search_client = None
         self.task_manager = None   # server.py lifespan'de set edilir
         self.memory_store = None   # server.py lifespan'de set edilir
+        self.reminder_store = None   # server.py lifespan'de set edilir
 
     async def execute(self, tool_name: str, tool_input: Dict) -> str:
         handlers = {
@@ -31,6 +32,8 @@ class SkillExecutor:
             # mekanizması eklenmeli (Egemen'in isteği, 17 Tem 2026).
             "system_info": self.system_info,
             "set_reminder": self.set_reminder,
+            "list_reminders": self.list_reminders,
+            "cancel_reminder": self.cancel_reminder,
             "get_weather": self.get_weather,
             "control_media": self.control_media,
             "get_now_playing": self.get_now_playing,
@@ -251,27 +254,35 @@ class SkillExecutor:
 
         return " | ".join([f"{k}: {v}" for k, v in info.items()])
 
-    # ─── Hatırlatıcı ─────────────────────────────────────────────────────────
-    async def set_reminder(self, message: str, minutes: int) -> str:
-        async def _remind():
-            await asyncio.sleep(minutes * 60)
-            # Basit bildirim — platform'a göre değişir
-            system = platform.system()
-            if system == "Windows":
-                subprocess.run(
-                    ["powershell", "-Command",
-                     f'Add-Type -AssemblyName System.Windows.Forms; '
-                     f'[System.Windows.Forms.MessageBox]::Show("{message}", "Jarvis Hatırlatıcı")'],
-                    capture_output=True
-                )
-            elif system == "Darwin":
-                subprocess.run(["osascript", "-e",
-                                f'display notification "{message}" with title "Jarvis"'])
-            else:
-                subprocess.run(["notify-send", "Jarvis", message])
+    # ─── Hatırlatıcılar ──────────────────────────────────────────────────────
+    async def set_reminder(self, message: str, minutes: int = None, daily_at: str = None) -> str:
+        if self.reminder_store is None:
+            return "Hatırlatıcı sistemi henüz hazır değil."
+        if minutes and daily_at:
+            return "Hem 'minutes' hem 'daily_at' verilemez, sadece birini kullan."
+        now = datetime.now()
+        if daily_at:
+            try:
+                hour, minute = map(int, daily_at.split(":"))
+                fire_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            except ValueError:
+                return "Saat formatı HH:MM olmalı (örn. '09:00')."
+            if fire_at <= now:
+                fire_at += timedelta(days=1)
+            return self.reminder_store.add(message, fire_at, recurrence="daily")
+        if not minutes:
+            return "Ne zaman hatırlatacağımı belirtmelisin (dakika veya saat)."
+        return self.reminder_store.add(message, now + timedelta(minutes=minutes))
 
-        asyncio.create_task(_remind())
-        return f"✅ {minutes} dakika sonra hatırlatacağım: '{message}'"
+    async def list_reminders(self) -> str:
+        if self.reminder_store is None:
+            return "Hatırlatıcı sistemi henüz hazır değil."
+        return self.reminder_store.list_active()
+
+    async def cancel_reminder(self, query: str) -> str:
+        if self.reminder_store is None:
+            return "Hatırlatıcı sistemi henüz hazır değil."
+        return self.reminder_store.cancel(query)
 
     # ─── Hava Durumu ─────────────────────────────────────────────────────────
     async def get_weather(self, city: str = "Istanbul") -> str:
