@@ -72,7 +72,7 @@ class ReminderStore:
         for r in active:
             when = datetime.fromisoformat(r["fire_at"]).strftime("%d.%m %H:%M")
             tag = " (her gün tekrarlar)" if r["recurrence"] == "daily" else ""
-            lines.append(f"- {r['message']} — {when}{tag}")
+            lines.append(f"- {r['message']}, {when}{tag}")
         return "\n".join(lines)
 
     def cancel(self, query: str) -> str:

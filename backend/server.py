@@ -100,10 +100,15 @@ async def lifespan(app: FastAPI):
                 pc_clients = [cid for cid in manager.active if cid.startswith("pc-")]
                 if not pc_clients:
                     continue
+                target = pc_clients[0]
                 now = datetime.now()
                 for r in app.state.reminder_store.due(now):
-                    await _speak_short(pc_clients[0], f"Hatırlatma: {r['message']}")
-                    app.state.reminder_store.mark_fired(r["id"], now=now)
+                    await _speak_short(target, f"Hatırlatma: {r['message']}")
+                    # Teslimat sırasında client koptuysa hatırlatıcıyı 'fired'
+                    # işaretleme - sessizce kaybolmasın/atlanmasın, bir sonraki
+                    # tarama (client tekrar bağlanınca) yeniden dener.
+                    if target in manager.active:
+                        app.state.reminder_store.mark_fired(r["id"], now=now)
             except Exception as e:
                 log.warning(f"Hatırlatıcı zamanlayıcı hatası: {e}")
 
