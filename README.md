@@ -88,6 +88,7 @@ Ayarlar ekranından PC'nizin yerel IP'sini girin.
 | Kalıcı hafıza (not alma, yapılacaklar, otomatik öğrenme) | ✅ |
 | Arka plan görev ajanı (araştırma+rapor, dosya işleri) | ✅ |
 | Riskli adımlarda sesli onay | ✅ |
+| Proaktiflik (sabah bröfingi, kalıcı hatırlatıcılar) | ✅ |
 
 ## Gelişmiş TTS
 
@@ -120,6 +121,17 @@ Veriler `Documents/Jarvis/Memory/` altında düz Markdown dosyaları halinde tut
 (repo dışında, kişisel bilgi git'e karışmaz). Detaylı tasarım:
 `docs/superpowers/specs/2026-07-22-kalici-hafiza-design.md`
 
+## Proaktiflik
+
+Jarvis artık sadece soruya cevap vermiyor, kendiliğinden inisiyatif alıyor.
+PC client'ın günün ilk bağlantısında hava durumu, açık yapılacaklar ve son
+günlerin özetinden doğal bir takip sorusu içeren kısa bir sabah bröfingi
+sesli okunur. Hatırlatıcılar artık kalıcı: "10 dakika sonra hatırlat" gibi
+tek seferlik veya "her sabah 09:00'da hatırlat" gibi tekrarlayan
+hatırlatıcılar `Documents/Jarvis/Memory/reminders.json`'da tutulur, sunucu
+kapansa/yeniden başlasa bile kaybolmaz. Detaylı tasarım:
+`docs/superpowers/specs/2026-07-23-proaktiflik-design.md`
+
 ## Yeni Yetenek Eklemek
 
 `backend/skills/executor.py` dosyasına yeni bir metod ekleyin,
@@ -135,6 +147,8 @@ Jarvis/
 │   │   ├── memory.py            # Oturum içi konuşma hafızası
 │   │   ├── long_term_memory.py  # Kalıcı hafıza deposu (MemoryStore)
 │   │   ├── memory_digest.py     # Arka plan konuşma özetleme
+│   │   ├── reminders.py         # Kalıcı hatırlatıcı deposu (ReminderStore)
+│   │   ├── briefing.py          # Sabah bröfingi üretimi
 │   │   ├── stt.py               # Whisper STT
 │   │   └── tts.py               # Ses sentezi
 │   ├── skills/
