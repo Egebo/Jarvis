@@ -33,6 +33,19 @@ Temel kurallar:
 - Bilgisayar komutlarını, sistem bilgilerini ve interneti kullanabilirsin
 - Arka plan görevi hakkında soru gelirse (bitti mi, ne durumda) MUTLAKA
   task_status aracını çağır; görev durumu hakkında ASLA tahmin yürütme
+- Kendi teknik yapın hakkında soru gelirse ASLA uydurma teknik terimler
+  kullanma ("güvenli veri tabanı", "sistem çekirdeği" gibi şeyler yok).
+  Hafızan basitçe bilgisayarındaki bir klasörde düz metin (Markdown)
+  dosyaları halinde tutuluyor; bunu söyle. Bilmediğin bir şey sorulursa
+  uydurmak yerine bilmediğini söyle.
+- ÇOK ÖNEMLİ: Egemen'e ait somut bir bilgiyi (URL, adres, e-posta, dosya
+  yolu gibi) bilmiyorsan ASLA tahmin/icat edip onu doğruymuş gibi
+  kullanma ve başarı iddia etme ("açıldı", "kaydedildi" gibi). Önce sor.
+  Hafızanda (sistem promptuna yüklenen bilgilerde) yoksa ve konuşmada
+  daha önce geçmediyse, bilmiyorsundur.
+- Egemen seni bir konuda düzelttiğinde veya kalıcı olmaya değer yeni bir
+  bilgi verdiğinde (adres, tercih, karar) kendiliğinden remember() aracını
+  çağır — "kaydet" demesini bekleme, bu senin işin.
 - Samimi ve biraz mizahlı ol — robot gibi konuşma
 """
 
@@ -66,7 +79,7 @@ WAKE_WORD_SENSITIVITY = float(os.getenv("WAKE_WORD_SENSITIVITY", "0.7"))
 # Yanıttan sonra bu süre içinde wake word gerekmez (doğal sohbet devamı).
 # Eşleştirme artık sunucuda yapılıyor (backend/core/wakeword.py) — hem PC hem
 # web istemcisi aynı mantığı, aynı yerden kullanır.
-FOLLOWUP_WINDOW = float(os.getenv("FOLLOWUP_WINDOW", "8.0"))
+FOLLOWUP_WINDOW = float(os.getenv("FOLLOWUP_WINDOW", "15.0"))
 
 # ─── Sunucu ─────────────────────────────────────────────────────────────────
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
@@ -82,8 +95,16 @@ SILENCE_DURATION = 1.5      # Bu kadar sessizlik = konuşma bitti
 # ─── Görev Ajanı ────────────────────────────────────────────────────────────
 from pathlib import Path
 
+# Jarvis'e ait tüm veri klasörleri repo DIŞINDA, tek bir üst klasör altında
+# tutulur — masaüstünü kirletmesin diye Documents altına alındı (Egemen'in
+# isteği, 23 Tem 2026; önceden Desktop\Jarvis-Workspace / Desktop\Jarvis-Memory
+# idi).
+JARVIS_DATA_DIR = Path.home() / "Documents" / "Jarvis"
+
 AGENT_MODEL = os.getenv("AGENT_MODEL", "gemini-3.5-flash")  # görev ajanı (sohbet: GEMINI_MODEL)
-WORKSPACE_DIR = Path(os.getenv("JARVIS_WORKSPACE",
-                               str(Path.home() / "Desktop" / "Jarvis-Workspace")))
+WORKSPACE_DIR = Path(os.getenv("JARVIS_WORKSPACE", str(JARVIS_DATA_DIR / "Workspace")))
 APPROVAL_TIMEOUT = float(os.getenv("APPROVAL_TIMEOUT", "120"))  # sn; dolarsa RED
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "25"))
+
+# ─── Kalıcı Hafıza ──────────────────────────────────────────────────────────
+MEMORY_DIR = Path(os.getenv("JARVIS_MEMORY_DIR", str(JARVIS_DATA_DIR / "Memory")))

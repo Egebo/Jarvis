@@ -15,6 +15,20 @@ class JarvisBrain:
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.memory = ConversationMemory(max_turns=20)
         self.tools = self._define_tools()
+        self.system_prompt = self._build_system_prompt()
+
+    def _build_system_prompt(self) -> str:
+        """Çekirdek hafıza dosyalarını (karakter/hakkımda/ilgi alanları) oturum
+        başında bir kez okuyup sistem promptuna ekler. Import'lar burada (metod
+        içinde) yapılır ki testler backend.config.MEMORY_DIR'ı monkeypatch
+        edebilsin (modül-üstü import bunu engeller)."""
+        from backend.config import MEMORY_DIR
+        from backend.core.long_term_memory import MemoryStore
+        store = MemoryStore(MEMORY_DIR)
+        memory_context = store.read_core_files()
+        if memory_context.strip():
+            return SYSTEM_PROMPT + "\n\n## Egemen hakkında bildiklerin:\n" + memory_context
+        return SYSTEM_PROMPT
 
     def _define_tools(self) -> list:
         """
@@ -156,6 +170,52 @@ class JarvisBrain:
                     "required": []
                 }
             ),
+            types.FunctionDeclaration(
+                name="remember",
+                description="Kullanıcı 'not al', 'unutma ki', 'hatırla' dediğinde kalıcı bir bilgiyi kaydeder.",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {
+                        "fact": {"type": "string", "description": "Hatırlanacak bilgi, kısa ve net"},
+                        "category": {"type": "string",
+                                    "description": "karakter-tercihler, hakkimda, ilgi-alanlarim veya yeni bir konu adı",
+                                    "default": "hakkimda"}
+                    },
+                    "required": ["fact"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="add_todo",
+                description="Yapılacaklar listesine bir madde ekler.",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"item": {"type": "string", "description": "Eklenecek yapılacak iş"}},
+                    "required": ["item"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="complete_todo",
+                description="Yapılacaklar listesindeki bir maddeyi tamamlandı olarak işaretler.",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"item": {"type": "string", "description": "Tamamlanan maddenin metni veya bir kısmı"}},
+                    "required": ["item"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="list_todos",
+                description="Yapılacaklar listesini okur ('listemde ne var' gibi sorularda).",
+                parameters_json_schema={"type": "object", "properties": {}, "required": []}
+            ),
+            types.FunctionDeclaration(
+                name="recall",
+                description="Geçmiş konuşma özetlerinde arama yapar ('geçen hafta ne konuşmuştuk' gibi sorularda).",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "description": "Aranacak konu/anahtar kelime"}},
+                    "required": ["query"]
+                }
+            ),
         ]
         return [types.Tool(function_declarations=declarations)]
 
@@ -180,7 +240,7 @@ class JarvisBrain:
         self.memory.add("user", user_message)
 
         config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=self.system_prompt,
             max_output_tokens=MAX_TOKENS,
             tools=self.tools,
             # Sesli asistanda gecikme kritik: modelin cevap öncesi "düşünme"
@@ -255,3 +315,4 @@ class JarvisBrain:
 
     def reset_memory(self):
         self.memory.clear()
+        self.system_prompt = self._build_system_prompt()

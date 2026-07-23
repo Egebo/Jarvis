@@ -20,6 +20,7 @@ import logging
 import struct
 import sys
 import threading
+import time
 import uuid
 import wave
 import io
@@ -107,6 +108,9 @@ class JarvisPCClient:
         self.state = "idle"         # idle | listening | thinking | speaking
         self._recv_task = None
         self._playing = False       # Hoparlörden yanıt çalınıyor mu?
+        # Sadece gösterim amaçlı — sunucudan 'followup' mesajı gelince
+        # dolar. Gate kararı hâlâ tamamen sunucuda (backend/core/wakeword.py).
+        self.followup_until = 0.0
         # Kalibrasyonla güncellenir (calibrate_noise)
         self.start_threshold = SILENCE_THRESHOLD
         self.end_threshold = SILENCE_THRESHOLD
@@ -124,9 +128,11 @@ class JarvisPCClient:
             play_audio_bytes(audio)
             if self._audio_queue.empty():
                 self._playing = False
-                # Takip penceresi artık sunucuda tutuluyor (backend/config.py
-                # FOLLOWUP_WINDOW) — burası sadece bilgilendirme yapıyor.
-                print("🎧 Dinliyorum ('Jarvis' demeden de devam edebilirsin)")
+                # Takip penceresi burada tahmin edilmiyor — sunucu 'followup'
+                # mesajıyla açıldığını bildirene kadar hiçbir şey yazdırmıyoruz
+                # (bkz. _handle_server_msg). Önceden burada her zaman "Jarvis
+                # demeden konuşabilirsin" yazıyordu, sunucu gerçekten öyle
+                # düşünmese bile — Egemen'in bulduğu sorun, 23 Tem 2026.
 
     def interrupt_playback(self):
         """Barge-in: çalan sesi kes, kuyruktaki bekleyenleri at."""
@@ -178,7 +184,15 @@ class JarvisPCClient:
             self.state = msg["data"]
             icons = {"idle": "😴", "transcribing": "👂", "thinking": "🧠",
                      "speaking": "🔊", "reset": "🔄"}
-            print(f"\r{icons.get(self.state, '?')} {self.state}       ", end="", flush=True)
+            icon = icons.get(self.state, "?")
+            label = self.state
+            if self.state == "idle" and time.time() < self.followup_until:
+                icon, label = "👂", "beklemede (Jarvis'siz konuşabilirsin)"
+            print(f"\r{icon} {label}       ", end="", flush=True)
+
+        elif mtype == "followup":
+            self.followup_until = time.time() + float(msg["data"])
+            print(f"\n👂 Beklemedeyim ({msg['data']:.0f}sn 'Jarvis' demeden konuşabilirsin)")
 
         elif mtype == "transcript":
             print(f"\n🗣️  Sen: {msg['data']}")
@@ -263,12 +277,19 @@ class JarvisPCClient:
         log.info(f"🎚️  Mikrofon kalibrasyonu: ortam={ambient:.0f}, "
                  f"başlama eşiği={self.start_threshold:.0f}, bitiş eşiği={self.end_threshold:.0f}")
 
-    def wait_for_command(self) -> bytes | None:
+    def wait_for_command(self) -> tuple[bytes, bool] | None:
         """
         Ses başlayana kadar bekle (en fazla 10sn, yoksa çağıran tekrar dener) →
         konuşmanın TAMAMINI kaydet → ham PCM döndür.
         'Jarvis' geçip geçmediğine artık SUNUCU karar veriyor (backend/core/
         wakeword.py) — burada sadece ne zaman kayıt başlayıp biteceği belirlenir.
+
+        İkinci dönüş değeri: kayıt BAŞLADIĞI anda (konuşmanın süresi değil,
+        sadece bekleme anı) takip penceresi hâlâ açık mıydı. Bunu gönderim
+        anında değil başlama anında ölçmek şart — uzun bir cümleyi kaydedip
+        göndermek saniyeler sürebiliyor, o süre pencereyi dolduruyor ve
+        sunucu tarafında yanlışlıkla gate'e takılabiliyordu (Egemen'in
+        bulduğu sorun, 23 Tem 2026).
         """
         import collections
 
@@ -280,6 +301,7 @@ class JarvisPCClient:
             frames_per_buffer=CHUNK
         )
 
+        was_in_followup = False
         try:
             # 1) Ses başlayana kadar bekle (öncesinden 0.5s tampon tut ki
             #    'Jarvis'in J'si kırpılmasın)
@@ -295,6 +317,7 @@ class JarvisPCClient:
                 if rms(data) >= self.start_threshold:
                     voiced_streak += 1
                     if voiced_streak >= 3:
+                        was_in_followup = time.time() < self.followup_until
                         break
                 else:
                     voiced_streak = 0
@@ -320,7 +343,7 @@ class JarvisPCClient:
             stream.stop_stream()
             stream.close()
 
-        return b"".join(frames)
+        return b"".join(frames), was_in_followup
 
     # ── Ana Döngü ────────────────────────────────────────────────────────────
     async def run(self):
@@ -342,13 +365,14 @@ class JarvisPCClient:
         # not: sesle kesme mikrofonun kendi hoparlörünü duyup karışıyordu).
         while True:
             if self.state == "idle" and not self._playing:
-                pcm = await asyncio.get_event_loop().run_in_executor(
+                result = await asyncio.get_event_loop().run_in_executor(
                     None, self.wait_for_command
                 )
-                if pcm:
+                if result:
+                    pcm, was_in_followup = result
                     print("⚡ Komut gönderiliyor...")
                     self._beep()
-                    await self._send_audio(pcm)
+                    await self._send_audio(pcm, skip_gate=was_in_followup)
             else:
                 await asyncio.sleep(0.1)
 

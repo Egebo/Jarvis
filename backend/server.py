@@ -34,7 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.config import SERVER_HOST, SERVER_PORT, FOLLOWUP_WINDOW
+from backend.config import SERVER_HOST, SERVER_PORT, FOLLOWUP_WINDOW, MEMORY_DIR
 from backend.core.brain import JarvisBrain
 from backend.core.stt import SpeechToText
 from backend.core.tts import TextToSpeech
@@ -80,6 +80,10 @@ async def lifespan(app: FastAPI):
 
     app.state.task_manager = TaskManager(event_cb=task_event)
     app.state.executor.task_manager = app.state.task_manager
+
+    from backend.core.long_term_memory import MemoryStore
+    app.state.memory_store = MemoryStore(MEMORY_DIR)
+    app.state.executor.memory_store = app.state.memory_store
 
     log.info("✅ Jarvis hazır! Bağlantı bekleniyor...")
     yield
@@ -141,6 +145,8 @@ followup_until: dict[str, float] = {}
 def get_brain(client_id: str) -> JarvisBrain:
     if client_id not in sessions:
         sessions[client_id] = JarvisBrain()
+    else:
+        sessions[client_id].system_prompt = sessions[client_id]._build_system_prompt()
     return sessions[client_id]
 
 
@@ -200,6 +206,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await manager.send(client_id, {"type": "transcript", "data": transcript})
                 await _process_message(client_id, transcript, brain, tts, executor)
                 followup_until[client_id] = time.time() + FOLLOWUP_WINDOW
+                # İstemciye takip penceresinin açıldığını bildir — bu olmadan
+                # istemci (web arayüzü/PC client) gerçekte 'Jarvis' demeden
+                # konuşulabilecek bir an olduğunu bilemiyordu, hep aynı sabit
+                # metni gösteriyordu (Egemen'in bulduğu sorun, 23 Tem 2026).
+                await manager.send(client_id, {"type": "followup", "data": FOLLOWUP_WINDOW})
 
             # ── Yazılı giriş ─────────────────────────────────────────────────
             elif msg_type == "text":
@@ -219,16 +230,34 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
             # ── Hafıza sıfırlama ─────────────────────────────────────────────
             elif msg_type == "reset":
+                # Sıfırlamadan ÖNCE anlık kopya al (get_messages() yeni bir liste
+                # döndürür) - arka plan görevi çalışırken brain.memory temizlenmiş
+                # olabilir, canlı referans yerine kopya kullanılır.
+                messages_snapshot = brain.memory.get_messages()
+                asyncio.create_task(_save_session_memory(messages_snapshot, app.state.memory_store))
                 brain.reset_memory()
                 await manager.send(client_id, {"type": "status", "data": "reset"})
                 log.info(f"🔄 [{client_id}] Hafıza sıfırlandı")
 
     except WebSocketDisconnect:
         manager.disconnect(client_id)
+        messages_snapshot = brain.memory.get_messages()
+        asyncio.create_task(_save_session_memory(messages_snapshot, app.state.memory_store))
+        brain.reset_memory()
     except Exception as e:
         log.error(f"❌ [{client_id}] Hata: {e}", exc_info=True)
         await manager.send(client_id, {"type": "error", "data": str(e)})
         manager.disconnect(client_id)
+
+
+async def _save_session_memory(messages: list, store):
+    """Oturum bittiğinde (kopma/sıfırlama) arka planda konuşmayı özetler.
+    Kendi try/except'i var - burada patlayan hiçbir şey sunucuyu etkilemez."""
+    from backend.core.memory_digest import summarize_and_save
+    try:
+        await summarize_and_save(messages, store)
+    except Exception as e:
+        log.warning(f"Hafıza özetleme başarısız: {e}")
 
 
 async def _speak_short(client_id: str, text: str):

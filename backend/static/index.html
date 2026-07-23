@@ -258,14 +258,22 @@
 
   // idle durumunun kendi içinde alt durumları var: mikrofon hiç açılmadıysa
   // "uykuda", açık ama sessize alındıysa "sessize alındı", kalibre oluyorsa
-  // "kalibre ediliyor", yoksa "beklemede — Jarvis bekliyorum". Bu ayrım
-  // olmadan kullanıcı Jarvis'in dinleyip dinlemediğini anlayamıyordu
-  // (Egemen'in geri bildirimi, 22 Tem 2026).
+  // "kalibre ediliyor". Geri kalanı wake word gerekip gerekmediğine göre
+  // ikiye ayrılır: sunucudan 'followup' sinyali gelmemişse (veya süresi
+  // geçmişse) "UYKUDA" — Jarvis demen lazım; sinyal geçerliyse "BEKLEMEDE"
+  // — Jarvis'siz konuşabilirsin. Önceden ikisi de aynı sabit metni
+  // gösteriyordu, kullanıcı hangi durumda olduğunu anlayamıyordu
+  // (Egemen'in geri bildirimi, 22-23 Tem 2026).
+  var followupUntilClient = 0;
+
   function idleLabel() {
     if (!continuousActive) return { text: '😴 UYKUDA — TIKLA UYANDIR', color: '#00BFFF' };
     if (calibrating) return { text: '🎚 KALİBRE EDİLİYOR...', color: '#FFD700' };
     if (micMuted) return { text: '🔇 SESSİZE ALINDI', color: '#FFD700' };
-    return { text: '👂 BEKLEMEDE — "JARVIS" DE', color: '#00FF7F' };
+    if (Date.now() < followupUntilClient) {
+      return { text: '👂 BEKLEMEDE — Jarvis\'siz konuşabilirsin', color: '#00FF7F' };
+    }
+    return { text: '😴 UYKUDA — "JARVIS" DE', color: '#00BFFF' };
   }
 
   function labelFor(s) {
@@ -304,6 +312,17 @@
     ignoredUntil = Date.now() + 1300;
     renderStatus();
     setTimeout(renderStatus, 1300);
+  }
+
+  // Sunucu takip penceresi açtığını bildirdiğinde çağrılır (saniye cinsinden
+  // süre gelir). Pencere kapanınca etiket otomatik "UYKUDA"ya dönsün diye
+  // bir zamanlayıcı da kurulur.
+  function openFollowupWindow(seconds) {
+    followupUntilClient = Date.now() + seconds * 1000;
+    renderStatus();
+    setTimeout(function () {
+      if (state === 'idle') renderStatus();
+    }, seconds * 1000 + 50);
   }
 
   // Mikrofon yerel durumu değiştiğinde (kalibrasyon bitti, sessize alındı...)
@@ -358,6 +377,8 @@
       } else if (msg.type === 'ignored') {
         console.log('Sana değildi:', msg.data);
         flashIgnored();
+      } else if (msg.type === 'followup') {
+        openFollowupWindow(msg.data);
       }
     };
 
@@ -527,6 +548,13 @@
     utteranceChunks = prerollBuffer.slice();
     recordedChunkCount = utteranceChunks.length;
     silenceStreak = 0;
+    // Takip penceresi kayıt BAŞLARKEN açıksa gate'ten muaf tut. Bunu
+    // gönderim anında değil burada (başlama anında) kontrol etmek şart —
+    // uzun bir cümleyi kaydedip göndermek saniyeler sürebiliyor, o süre
+    // pencereyi dolduruyordu (Egemen'in bulduğu sorun, 23 Tem 2026).
+    if (Date.now() < followupUntilClient) {
+      pendingSkipGate = true;
+    }
     micBtn.classList.add('recording');
   }
 

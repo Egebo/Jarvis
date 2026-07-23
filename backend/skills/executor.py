@@ -19,6 +19,7 @@ class SkillExecutor:
     def __init__(self):
         self._search_client = None
         self.task_manager = None   # server.py lifespan'de set edilir
+        self.memory_store = None   # server.py lifespan'de set edilir
 
     async def execute(self, tool_name: str, tool_input: Dict) -> str:
         handlers = {
@@ -36,6 +37,11 @@ class SkillExecutor:
             "take_screenshot": self.take_screenshot,
             "start_task": self.start_task,
             "task_status": self.task_status,
+            "remember": self.remember,
+            "add_todo": self.add_todo,
+            "complete_todo": self.complete_todo,
+            "list_todos": self.list_todos,
+            "recall": self.recall,
         }
 
         handler = handlers.get(tool_name)
@@ -66,6 +72,32 @@ class SkillExecutor:
         if self.task_manager is None:
             return "Görev sistemi henüz hazır değil."
         return self.task_manager.status_text()
+
+    # ─── Kalıcı Hafıza köprüsü ─────────────────────────────────────────────────
+    async def remember(self, fact: str, category: str = "hakkimda") -> str:
+        if self.memory_store is None:
+            return "Hafıza sistemi henüz hazır değil."
+        return self.memory_store.save_fact(category, fact)
+
+    async def add_todo(self, item: str) -> str:
+        if self.memory_store is None:
+            return "Hafıza sistemi henüz hazır değil."
+        return self.memory_store.add_todo(item)
+
+    async def complete_todo(self, item: str) -> str:
+        if self.memory_store is None:
+            return "Hafıza sistemi henüz hazır değil."
+        return self.memory_store.complete_todo(item)
+
+    async def list_todos(self) -> str:
+        if self.memory_store is None:
+            return "Hafıza sistemi henüz hazır değil."
+        return self.memory_store.read_todos()
+
+    async def recall(self, query: str) -> str:
+        if self.memory_store is None:
+            return "Hafıza sistemi henüz hazır değil."
+        return self.memory_store.search_digests(query)
 
     # ─── Web Arama ───────────────────────────────────────────────────────────
     async def web_search(self, query: str) -> str:
