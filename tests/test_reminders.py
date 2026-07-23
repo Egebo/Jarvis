@@ -34,7 +34,7 @@ def test_mark_fired_daily_recurrence_rolls_fire_at_forward_one_day(tmp_path):
     store.add("Sabah egzersizi", now, recurrence="daily")
     due = store.due(now)
     reminder_id = due[0]["id"]
-    store.mark_fired(reminder_id)
+    store.mark_fired(reminder_id, now=now)
     # Aynı gün artık due değil (bir sonraki güne kaydı)
     assert store.due(now) == []
     # Ertesi gün aynı saatte tekrar due
@@ -42,6 +42,24 @@ def test_mark_fired_daily_recurrence_rolls_fire_at_forward_one_day(tmp_path):
     due_next_day = store.due(next_day)
     assert len(due_next_day) == 1
     assert due_next_day[0]["message"] == "Sabah egzersizi"
+
+
+def test_mark_fired_daily_recurrence_catches_up_after_multi_day_downtime(tmp_path):
+    # Sunucu birkaç gün kapalı kalıp yeniden başladığında (ör. 3 gün sonra),
+    # hatırlatıcı tek 'due' taramasında bugüne kadar ileri sarılmalı - yoksa
+    # ardışık zamanlayıcı tiklerinde art arda birkaç kez tetiklenir.
+    store = ReminderStore(tmp_path)
+    start = datetime(2026, 7, 20, 9, 0)
+    store.add("Su iç", start, recurrence="daily")
+    real_now = datetime(2026, 7, 23, 10, 0)  # 3 gün + 1 saat sonra
+    due = store.due(real_now)
+    reminder_id = due[0]["id"]
+    store.mark_fired(reminder_id, now=real_now)
+    # Geçmiş günlere ait tüm oluşumlar atlanmış olmalı, artık due değil
+    assert store.due(real_now) == []
+    # Bir sonraki geçerli oluşum 24 Temmuz 09:00 olmalı (23'ü değil, o da geçti)
+    due_next = store.due(datetime(2026, 7, 24, 9, 0))
+    assert len(due_next) == 1
 
 
 def test_list_active_empty_store(tmp_path):

@@ -26,6 +26,7 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import uvicorn
@@ -85,8 +86,32 @@ async def lifespan(app: FastAPI):
     app.state.memory_store = MemoryStore(MEMORY_DIR)
     app.state.executor.memory_store = app.state.memory_store
 
+    from backend.core.reminders import ReminderStore
+    app.state.reminder_store = ReminderStore(MEMORY_DIR)
+    app.state.executor.reminder_store = app.state.reminder_store
+
+    async def _reminder_scheduler():
+        """60 saniyede bir vadesi gelen hatırlatıcıları kontrol eder. Bağlı
+        bir PC client varsa sesli teslim edilir; yoksa 'due' kalmaya devam
+        eder ve bir sonraki taramada (client bağlanınca) teslim edilir."""
+        while True:
+            await asyncio.sleep(60)
+            try:
+                pc_clients = [cid for cid in manager.active if cid.startswith("pc-")]
+                if not pc_clients:
+                    continue
+                now = datetime.now()
+                for r in app.state.reminder_store.due(now):
+                    await _speak_short(pc_clients[0], f"Hatırlatma: {r['message']}")
+                    app.state.reminder_store.mark_fired(r["id"], now=now)
+            except Exception as e:
+                log.warning(f"Hatırlatıcı zamanlayıcı hatası: {e}")
+
+    app.state.reminder_scheduler_task = asyncio.create_task(_reminder_scheduler())
+
     log.info("✅ Jarvis hazır! Bağlantı bekleniyor...")
     yield
+    app.state.reminder_scheduler_task.cancel()
     log.info("👋 Jarvis kapatılıyor...")
 
 
@@ -155,6 +180,8 @@ def get_brain(client_id: str) -> JarvisBrain:
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await manager.connect(client_id, websocket)
     brain = get_brain(client_id)
+    if client_id.startswith("pc-"):
+        asyncio.create_task(_maybe_send_briefing(client_id))
     stt: SpeechToText = app.state.stt
     tts: TextToSpeech = app.state.tts
     executor: SkillExecutor = app.state.executor
@@ -258,6 +285,44 @@ async def _save_session_memory(messages: list, store):
         await summarize_and_save(messages, store)
     except Exception as e:
         log.warning(f"Hafıza özetleme başarısız: {e}")
+
+
+async def _maybe_send_briefing(client_id: str):
+    """Günün ilk PC bağlantısında sabah bröfingini üretip seslendirir.
+    Bağlantı akışını bloklamamak için websocket_endpoint'ten ayrı task
+    olarak çağrılır - bu yüzden kendi try/except'i var, burada patlayan
+    hiçbir şey sunucuyu veya bağlantıyı etkilemez (Faz 2'deki
+    _save_session_memory ile aynı desen). last_briefing_date, seslendirme
+    BAŞARILI olduktan sonra işaretlenir - TTS/gönderim hatası olursa bugünün
+    bröfingi sessizce kaybolmaz, bir sonraki bağlantıda tekrar denenir."""
+    try:
+        store = app.state.reminder_store
+        today = datetime.now().strftime("%Y-%m-%d")
+        if store.get_last_briefing_date() == today:
+            return
+        from backend.core.briefing import generate_briefing_text
+        executor: SkillExecutor = app.state.executor
+        weather = await executor.get_weather()
+        todos = app.state.memory_store.read_todos()
+        digests = _recent_digests_text(app.state.memory_store)
+        text = await generate_briefing_text(weather, todos, digests)
+        if text is None:
+            return
+        await _speak_short(client_id, text)
+        store.set_last_briefing_date(today)
+    except Exception as e:
+        log.warning(f"Sabah bröfingi başarısız: {e}")
+
+
+def _recent_digests_text(store) -> str:
+    """Son 2 günün digest dosyalarını birleştirir (varsa)."""
+    parts = []
+    for days_ago in (0, 1):
+        date = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        path = store.base_dir / "digests" / f"{date}.md"
+        if path.exists():
+            parts.append(path.read_text(encoding="utf-8"))
+    return "\n\n".join(parts)
 
 
 async def _speak_short(client_id: str, text: str):

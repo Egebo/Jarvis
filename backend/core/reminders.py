@@ -45,12 +45,18 @@ class ReminderStore:
         return [r for r in data["reminders"]
                 if not r["done"] and datetime.fromisoformat(r["fire_at"]) <= now]
 
-    def mark_fired(self, reminder_id: str):
+    def mark_fired(self, reminder_id: str, now: datetime | None = None):
+        now = now or datetime.now()
         data = self._read()
         for r in data["reminders"]:
             if r["id"] == reminder_id:
                 if r["recurrence"] == "daily":
-                    next_fire = datetime.fromisoformat(r["fire_at"]) + timedelta(days=1)
+                    # Sunucu birkaç gün kapalı kaldıysa tek gün değil, 'now'ı
+                    # geçene kadar ileri sar - yoksa aynı hatırlatıcı art arda
+                    # birkaç tik boyunca tekrar tekrar tetiklenir.
+                    next_fire = datetime.fromisoformat(r["fire_at"])
+                    while next_fire <= now:
+                        next_fire += timedelta(days=1)
                     r["fire_at"] = next_fire.isoformat()
                 else:
                     r["done"] = True
