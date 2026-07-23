@@ -106,3 +106,24 @@ def test_search_digests_no_match(tmp_path):
     store = MemoryStore(tmp_path)
     result = store.search_digests("alakasız bir konu")
     assert "bulunamadı" in result
+
+
+def test_category_path_strips_traversal(tmp_path):
+    store = MemoryStore(tmp_path)
+    store.save_fact("../../evil", "kaçış denemesi")
+    # Dosya base_dir İÇİNDE bir yerde oluşmalı, dışına taşmamalı
+    created = list(tmp_path.rglob("*.md"))
+    assert all(tmp_path in p.parents or p.parent == tmp_path for p in created)
+    assert not (tmp_path.parent.parent / "evil.md").exists()
+
+
+def test_category_path_handles_slash_without_crashing(tmp_path):
+    store = MemoryStore(tmp_path)
+    msg = store.save_fact("iş/kariyer", "yeni pozisyon")
+    assert "Kaydedildi" in msg
+
+
+def test_category_path_empty_after_sanitize_falls_back(tmp_path):
+    store = MemoryStore(tmp_path)
+    msg = store.save_fact("...", "kenar durum")
+    assert "Kaydedildi" in msg

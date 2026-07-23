@@ -315,3 +315,4 @@ class JarvisBrain:
 
     def reset_memory(self):
         self.memory.clear()
+        self.system_prompt = self._build_system_prompt()

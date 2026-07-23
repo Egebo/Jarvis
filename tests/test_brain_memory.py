@@ -27,3 +27,18 @@ def test_brain_ignores_non_core_category(tmp_path, monkeypatch):
     from backend.core.brain import JarvisBrain
     brain = JarvisBrain()
     assert "Bu çekirdek değil" not in brain.system_prompt
+
+
+def test_reset_memory_rebuilds_system_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "MEMORY_DIR", tmp_path)
+    from backend.core.brain import JarvisBrain
+    from backend.core.long_term_memory import MemoryStore
+
+    brain = JarvisBrain()
+    assert "İstanbul" not in brain.system_prompt
+
+    store = MemoryStore(tmp_path)
+    store.save_fact("hakkimda", "Egemen İstanbul'a taşındı")
+
+    brain.reset_memory()
+    assert "İstanbul" in brain.system_prompt

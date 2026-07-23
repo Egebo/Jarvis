@@ -3,6 +3,7 @@ Kalıcı hafıza deposu, Egemen'le ilgili bilgiyi kategorilere ayrılmış
 Markdown dosyalarında tutar. Repo dışında (backend.config.MEMORY_DIR).
 Spec: docs/superpowers/specs/2026-07-22-kalici-hafiza-design.md
 """
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,8 @@ class MemoryStore:
 
     def _category_path(self, category: str) -> Path:
         safe = category.strip().lower().replace(" ", "-")
+        safe = re.sub(r"[^a-z0-9ığüşöçİĞÜŞÖÇ\-]", "", safe)
+        safe = safe.strip("-") or "genel"
         return self.base_dir / f"{safe}.md"
 
     def save_fact(self, category: str, text: str) -> str:

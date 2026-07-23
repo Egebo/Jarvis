@@ -145,6 +145,8 @@ followup_until: dict[str, float] = {}
 def get_brain(client_id: str) -> JarvisBrain:
     if client_id not in sessions:
         sessions[client_id] = JarvisBrain()
+    else:
+        sessions[client_id].system_prompt = sessions[client_id]._build_system_prompt()
     return sessions[client_id]
 
 
@@ -241,6 +243,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         manager.disconnect(client_id)
         messages_snapshot = brain.memory.get_messages()
         asyncio.create_task(_save_session_memory(messages_snapshot, app.state.memory_store))
+        brain.reset_memory()
     except Exception as e:
         log.error(f"❌ [{client_id}] Hata: {e}", exc_info=True)
         await manager.send(client_id, {"type": "error", "data": str(e)})
