@@ -28,11 +28,12 @@ RETRY_DELAYS = [5, 15, 30]  # sn; 429/503 için
 
 class TaskAgent:
     def __init__(self, description, file_tools: FileTools, executor,
-                 approval_cb, generate_fn=None, max_steps: int = AGENT_MAX_STEPS):
+                 approval_cb, mcp_registry=None, generate_fn=None, max_steps: int = AGENT_MAX_STEPS):
         self.description = description
         self.ft = file_tools
         self.executor = executor
         self.approval_cb = approval_cb
+        self.mcp_registry = mcp_registry
         self.max_steps = max_steps
         self._generate = generate_fn or self._real_generate
         # Sohbet geçmişi düz dict/list olarak tutulur (test edilen sahte Part/FunctionCall
@@ -78,12 +79,11 @@ class TaskAgent:
                 sdk_parts.append(part)  # zaten SDK Part'ı
         return types.Content(role=entry.get("role", "user"), parts=sdk_parts)
 
-    @staticmethod
-    def _declarations():
+    def _declarations(self):
         from google.genai import types
         schema = lambda props, req: {"type": "object", "properties": props, "required": req}
         s = {"type": "string"}
-        return [
+        declarations = [
             types.FunctionDeclaration(name="list_dir", description="Klasör içeriğini listeler",
                 parameters_json_schema=schema({"path": s}, [])),
             types.FunctionDeclaration(name="read_file", description="Dosya okur",
@@ -101,6 +101,9 @@ class TaskAgent:
             types.FunctionDeclaration(name="web_search", description="Web'de araştırır",
                 parameters_json_schema=schema({"query": s}, ["query"])),
         ]
+        if self.mcp_registry:
+            declarations += self.mcp_registry.all_declarations()
+        return declarations
 
     # ── araç yürütme ──
     async def _exec_tool(self, name: str, args: dict) -> str:
@@ -126,6 +129,12 @@ class TaskAgent:
                 return await self.executor.run_command(args["command"])
             if name == "web_search":
                 return await self.executor.web_search(args["query"])
+            if self.mcp_registry and self.mcp_registry.has(name):
+                if not self.mcp_registry.is_read_only(name):
+                    approved = await self.approval_cb(f"MCP aracı '{name}' çalıştırılsın mı: {args}")
+                    if not approved:
+                        return "Kullanıcı bu adımı REDDETTİ. Adımı atla, işi elindekiyle sürdür."
+                return await self.mcp_registry.call(name, args)
             return f"Bilinmeyen araç: {name}"
         except Exception as e:
             return f"Araç hatası ({name}): {e}"
