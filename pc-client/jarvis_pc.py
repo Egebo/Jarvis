@@ -407,7 +407,14 @@ class JarvisPCClient:
         """
         loop = asyncio.get_event_loop()
         while True:
-            await loop.run_in_executor(None, input)
+            try:
+                await loop.run_in_executor(None, input)
+            except EOFError:
+                # Konsolsuz (ör. tepsi ikonundan arka planda) başlatıldığında
+                # stdin yok - Enter'la kesme özelliği devre dışı kalır ama
+                # geri kalan her şey (sesli komut, wake word) normal çalışır.
+                log.info("Konsol bulunamadı, Enter'la kesme devre dışı.")
+                return
             if self._playing:
                 print("✋ Enter'a basıldı, konuşma kesiliyor...")
                 self.interrupt_playback()

@@ -25,3 +25,4 @@ winrt-Windows.Media.Control; sys_platform == 'win32'
 winrt-Windows.Foundation; sys_platform == 'win32'
 winrt-Windows.Storage.Streams; sys_platform == 'win32'
 mcp>=1.0.0
+pystray>=0.19.0; sys_platform == 'win32'
