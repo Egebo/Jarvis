@@ -383,6 +383,8 @@
         flashIgnored();
       } else if (msg.type === 'followup') {
         openFollowupWindow(msg.data);
+      } else if (msg.type === 'interrupt') {
+        interruptPlayback();
       }
     };
 
@@ -681,13 +683,22 @@
     }
   });
 
-  interruptBtn.addEventListener('click', interruptPlayback);
+  // Kesme sadece bu sekmenin kendi sesini değil, TÜM client'ları (özellikle
+  // PC client'ın hoparlörünü) kesmesi için sunucuya da 'interrupt' yayınlatılır
+  // - PC client tepsiden (konsolsuz) başladığında kendi Enter'la kesmesi
+  // çalışmıyor, bu tek güvenilir uzaktan kesme yolu (Egemen'in sorunu, 31 Tem 2026).
+  function interruptEverywhere() {
+    interruptPlayback();
+    send({ type: 'interrupt' });
+  }
+
+  interruptBtn.addEventListener('click', interruptEverywhere);
 
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter') return;
     if (document.activeElement === textInput) return; // form gönderimine karışma
     e.preventDefault();
-    if (audioPlaying) interruptPlayback();
+    if (audioPlaying) interruptEverywhere();
     manualRecord();
   });
 

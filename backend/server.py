@@ -294,6 +294,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await manager.broadcast({"type": "status", "data": "reset"})
                 log.info(f"🔄 [{client_id}] Hafıza sıfırlandı")
 
+            # ── Uzaktan kesme ─────────────────────────────────────────────────
+            elif msg_type == "interrupt":
+                # Herhangi bir client (ör. web'deki KES butonu) tüm client'ların
+                # çalan sesini kessin diye - PC client tepsiden (konsolsuz)
+                # başlatıldığında kendi Enter'la kesme özelliği çalışmıyor,
+                # bu tek uzaktan kesme yolu (Egemen'in sorunu, 31 Tem 2026).
+                await manager.broadcast({"type": "interrupt"})
+                log.info(f"✋ [{client_id}] kesme sinyali gönderdi")
+
     except WebSocketDisconnect:
         manager.disconnect(client_id)
         # Hafıza artık PAYLAŞILAN - bir client (ör. web sekmesi) ayrılırken

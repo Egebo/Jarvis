@@ -50,8 +50,7 @@ class SpeechToText:
                 fp16=(self._device == "cuda"),
                 condition_on_previous_text=False,
             )
-            text = result["text"].strip()
-            return text
+            return _filter_hallucinated_segments(result)
         finally:
             os.unlink(tmp_path)
 
@@ -66,7 +65,46 @@ class SpeechToText:
             language=self._language(),
             fp16=(self._device == "cuda"),
         )
-        return result["text"].strip()
+        return _filter_hallucinated_segments(result)
+
+
+# Whisper, sessizlik/düşük seviyeli arka plan gürültüsünde konuşma yokken bile
+# akıcı ama tamamen uydurma metin üretebiliyor (ör. "Thank you.", "Peel the
+# chain" gibi - YouTube altyazısı tarzı eğitim verisinden sızan halüsinasyon,
+# bilinen bir Whisper davranışı). no_speech_prob bunu yakalamıyor (model
+# "konuşma var" diye eminmiş gibi davranıyor) ama avg_logprob (segmentin
+# transkripsiyonuna ne kadar güvendiği) çok düşük çıkıyor. Gerçek konuşmada
+# ölçülen avg_logprob ~-0.1, uydurma segmentlerde ~-3.7 (31 Tem 2026 testi) -
+# aradaki boşluk geniş, -1.0 güvenli bir eşik.
+HALLUCINATION_LOGPROB_THRESHOLD = -1.0
+
+# Bazı halüsinasyonlar ("Thank you.", YouTube altyazı kalıntıları gibi)
+# eğitim verisinde o kadar sık geçiyor ki model onları düşük ses/gürültüden
+# bile YÜKSEK güvenle üretebiliyor (avg_logprob filtresi kaçırıyor). Bilinen,
+# sık görülen halüsinasyon kalıpları için ayrıca bir liste (topluluk genelinde
+# belgelenmiş bir Whisper davranışı; kendi log'larımızda da görüldü, 31 Tem 2026).
+KNOWN_HALLUCINATIONS = {
+    "thank you.", "thank you", "thanks for watching!", "thanks for watching",
+    "thank you for watching!", "thank you for watching", "please subscribe",
+    "subscribe", "bye.", "bye", "bye bye.", "www.youtube.com",
+    "altyazı m.k.", "izlediğiniz için teşekkürler", "i'll see you next time.",
+}
+
+
+def _is_known_hallucination(text: str) -> bool:
+    normalized = text.strip().lower()
+    return normalized in KNOWN_HALLUCINATIONS
+
+
+def _filter_hallucinated_segments(result: dict) -> str:
+    segments = result.get("segments") or []
+    if not segments:
+        text = result.get("text", "").strip()
+        return "" if _is_known_hallucination(text) else text
+    kept = [s["text"] for s in segments
+            if s.get("avg_logprob", 0.0) >= HALLUCINATION_LOGPROB_THRESHOLD
+            and not _is_known_hallucination(s["text"])]
+    return " ".join(kept).strip()
 
 
 def _write_wav(f, pcm_bytes: bytes, sample_rate: int = 16000, channels: int = 1, bits: int = 16):

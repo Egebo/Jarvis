@@ -50,6 +50,12 @@ FORMAT = pyaudio.paInt16
 SILENCE_THRESHOLD = 600    # RMS eşiği — daha düşük = daha hassas
 SILENCE_DURATION = 1.2     # Bu kadar sessizlik → kayıt bitti
 MAX_RECORD_SECONDS = 12    # Maksimum kayıt süresi
+# Jarvis konuşmayı bitirdikten sonra mikrofonun tekrar dinlemeye başlamasından
+# önce beklenecek süre — odadaki akustik yankı/kalıntı ses, kalibre edilmiş
+# eşiği aşıp Jarvis'in kendi sesini yeni bir komut sanmasına yol açıyordu
+# (Egemen'in "kendini duyuyor" şikayeti, 31 Tem 2026; gerçek AEC donanımı
+# olmadığı için basit bir bekleme ile hafifletiliyor).
+PLAYBACK_COOLDOWN = 0.7
 
 # 'Jarvis' geçiyor mu kontrolü artık SUNUCUDA yapılıyor (backend/core/
 # wakeword.py) — hem PC hem web istemcisi aynı mantığı kullansın diye.
@@ -108,6 +114,7 @@ class JarvisPCClient:
         self.state = "idle"         # idle | listening | thinking | speaking
         self._recv_task = None
         self._playing = False       # Hoparlörden yanıt çalınıyor mu?
+        self._playback_ended_at = 0.0   # PLAYBACK_COOLDOWN için (akustik yankı)
         # Sadece gösterim amaçlı — sunucudan 'followup' mesajı gelince
         # dolar. Gate kararı hâlâ tamamen sunucuda (backend/core/wakeword.py).
         self.followup_until = 0.0
@@ -128,6 +135,7 @@ class JarvisPCClient:
             play_audio_bytes(audio)
             if self._audio_queue.empty():
                 self._playing = False
+                self._playback_ended_at = time.time()
                 # Takip penceresi burada tahmin edilmiyor — sunucu 'followup'
                 # mesajıyla açıldığını bildirene kadar hiçbir şey yazdırmıyoruz
                 # (bkz. _handle_server_msg). Önceden burada her zaman "Jarvis
@@ -207,6 +215,14 @@ class JarvisPCClient:
 
         elif mtype == "ignored":
             print(f"\n🙉 (duydum ama 'Jarvis' demedin, yok saydım: '{msg['data']}')")
+
+        elif mtype == "interrupt":
+            # Başka bir client'tan (ör. web arayüzündeki KES butonundan)
+            # gelen uzaktan kesme sinyali - konsolsuz (tepsi) çalışırken
+            # Enter'la kesme çalışmadığı için tek kesme yolu bu (Egemen'in
+            # sorunu, 31 Tem 2026).
+            self.interrupt_playback()
+            print("\n✋ Uzaktan kesildi.")
 
         elif mtype == "error":
             log.error(f"Sunucu hatası: {msg['data']}")
@@ -364,7 +380,8 @@ class JarvisPCClient:
         # Jarvis konuşurken dinlemiyoruz — kesme Enter ile yapılıyor (yukarıdaki
         # not: sesle kesme mikrofonun kendi hoparlörünü duyup karışıyordu).
         while True:
-            if self.state == "idle" and not self._playing:
+            in_cooldown = (time.time() - self._playback_ended_at) < PLAYBACK_COOLDOWN
+            if self.state == "idle" and not self._playing and not in_cooldown:
                 result = await asyncio.get_event_loop().run_in_executor(
                     None, self.wait_for_command
                 )
