@@ -9,11 +9,14 @@ pytestmark = pytest.mark.asyncio
 
 
 def _fake_tool(name, description="bir araç", read_only=None):
-    annotations = None if read_only is None else SimpleNamespace(readOnlyHint=read_only)
+    # Alan adları gerçek `mcp` paketinin (pydantic) modelleriyle birebir aynı:
+    # input_schema, read_only_hint (snake_case - MCP'nin JSON-RPC protokolü
+    # camelCase olsa da Python SDK'sı öyle değil, bkz. mcp_client.py'deki not).
+    annotations = None if read_only is None else SimpleNamespace(read_only_hint=read_only)
     return SimpleNamespace(
         name=name,
         description=description,
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
         annotations=annotations,
     )
 
@@ -206,6 +209,33 @@ async def test_call_joins_multiple_text_blocks_and_skips_non_text(tmp_path):
 
     reply = await registry.call("github__list_repos", {})
     assert reply == "birinci\nikinci"
+
+
+async def test_register_tools_matches_real_mcp_sdk_shape(tmp_path):
+    """Sahte SimpleNamespace'lerin gerçek `mcp` paketinin pydantic modelleriyle
+    (Tool/ToolAnnotations, snake_case alanlar) hâlâ uyumlu olduğunu doğrular.
+    `mcp` kurulu değilse atlanır (opsiyonel bağımlılık, sadece bu testte gerçek
+    paket gerekiyor - registry'nin geri kalanı hiçbir zaman gerçek mcp'ye
+    ihtiyaç duymuyor, connect_fn her zaman enjekte edilebiliyor)."""
+    mcp_types = pytest.importorskip("mcp.types")
+
+    config_path = _write_config(tmp_path, {"github": {"command": "npx", "args": []}})
+    real_tool = mcp_types.Tool(
+        name="list_repos",
+        description="Repoları listeler",
+        input_schema={"type": "object", "properties": {}},
+        annotations=mcp_types.ToolAnnotations(read_only_hint=True),
+    )
+    session = FakeSession([real_tool])
+
+    async def fake_connect(server_id, server_cfg, exit_stack):
+        return session
+
+    registry = McpToolRegistry()
+    await registry.connect_all(config_path, connect_fn=fake_connect)
+
+    assert registry.has("github__list_repos")
+    assert registry.is_read_only("github__list_repos")
 
 
 async def test_call_empty_content_returns_placeholder(tmp_path):

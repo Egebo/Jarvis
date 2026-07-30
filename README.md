@@ -138,7 +138,7 @@ kapansa/yeniden başlasa bile kaybolmaz. Detaylı tasarım:
 Jarvis, Claude Desktop/Claude Code gibi genel bir MCP (Model Context Protocol)
 host'u. `mcp_servers.example.json`'ı `Documents/Jarvis/mcp_servers.json`'a
 kopyalayıp herhangi bir MCP-uyumlu server'ı (Google Calendar, GitHub, Spotify,
-vb.) ekleyebilirsin — yeni kod yazmaya gerek yok. Güvenlik sınırı: canlı
+vb.) ekleyebilirsin, yeni kod yazmaya gerek yok. Güvenlik sınırı: canlı
 sohbette sadece salt-okunur (`readOnlyHint: true`) araçlar doğrudan
 çağrılabilir; yazma/silme gerektiren araçlar sadece arka plan görev ajanı
 üzerinden (`start_task`), mevcut sesli onay mekanizmasıyla çalışır. Detaylı

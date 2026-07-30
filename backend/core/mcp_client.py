@@ -65,7 +65,12 @@ class McpToolRegistry:
         result = await session.list_tools()
         for tool in result.tools:
             exposed_name = f"{server_id}__{tool.name}"
-            read_only = bool(getattr(tool.annotations, "readOnlyHint", False)) if tool.annotations else False
+            # NOT: mcp paketinin gerçek Tool/ToolAnnotations modelleri snake_case
+            # alan adları kullanıyor (input_schema, read_only_hint) - MCP'nin
+            # kendi JSON-RPC protokolü camelCase olsa da (inputSchema,
+            # readOnlyHint), Python SDK'sının pydantic modelleri öyle DEĞİL.
+            # Gerçek `mcp` paketine karşı doğrulanmış (2026-07-31, mcp==2.0.0).
+            read_only = bool(getattr(tool.annotations, "read_only_hint", False)) if tool.annotations else False
             self._tools[exposed_name] = {
                 "session": session,
                 "real_name": tool.name,
@@ -73,7 +78,7 @@ class McpToolRegistry:
                 "declaration": types.FunctionDeclaration(
                     name=exposed_name,
                     description=tool.description or f"{server_id}: {tool.name}",
-                    parameters_json_schema=tool.inputSchema or {"type": "object", "properties": {}},
+                    parameters_json_schema=tool.input_schema or {"type": "object", "properties": {}},
                 ),
             }
 

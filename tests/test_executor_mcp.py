@@ -5,8 +5,9 @@ pytestmark = pytest.mark.asyncio
 
 
 class FakeMcpRegistry:
-    def __init__(self, has_result=True):
+    def __init__(self, has_result=True, read_only=True):
         self._has_result = has_result
+        self._read_only = read_only
         self.has_calls = []
         self.call_calls = []
         self.raise_on_call = False
@@ -14,6 +15,9 @@ class FakeMcpRegistry:
     def has(self, name):
         self.has_calls.append(name)
         return self._has_result
+
+    def is_read_only(self, name):
+        return self._read_only
 
     async def call(self, name, args):
         self.call_calls.append((name, args))
@@ -67,3 +71,15 @@ async def test_mcp_call_exception_wrapped_as_arac_hatasi():
     reply = await ex.execute("github__list_repos", {})
     assert "Araç hatası" in reply
     assert "mcp patladı" in reply
+
+
+async def test_non_read_only_mcp_tool_refused_without_calling():
+    # Savunma katmanı: canlı sohbetin tool listesi normalde sadece salt-okunur
+    # MCP araçları içerir (brain.py), ama execute() bunu kendi başına da
+    # doğrular - is_read_only()=False ise call() HİÇ tetiklenmemeli.
+    ex = SkillExecutor()
+    fake_registry = FakeMcpRegistry(has_result=True, read_only=False)
+    ex.mcp_registry = fake_registry
+    reply = await ex.execute("github__delete_repo", {})
+    assert "start_task" in reply
+    assert fake_registry.call_calls == []

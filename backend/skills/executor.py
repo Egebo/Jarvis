@@ -56,6 +56,14 @@ class SkillExecutor:
                 return f"Araç hatası ({tool_name}): {str(e)}"
 
         if self.mcp_registry and self.mcp_registry.has(tool_name):
+            # Savunma katmanı: canlı sohbetin tool listesi zaten sadece
+            # salt-okunur MCP araçlarını içeriyor (brain.py), ama bu kontrol
+            # burada da tekrarlanıyor ki tool listesindeki ileride olası bir
+            # hata (ör. yanlışlıkla all_declarations() kullanılması) tek
+            # başına yeterli olmasın - iki bağımsız güvenlik katmanı olsun.
+            if not self.mcp_registry.is_read_only(tool_name):
+                return (f"'{tool_name}' değişiklik gerektiriyor, bunu doğrudan "
+                        f"yapamam - görev ajanını (start_task) kullan, o onay ister.")
             try:
                 return await self.mcp_registry.call(tool_name, tool_input)
             except Exception as e:
