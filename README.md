@@ -89,6 +89,7 @@ Ayarlar ekranından PC'nizin yerel IP'sini girin.
 | Arka plan görev ajanı (araştırma+rapor, dosya işleri) | ✅ |
 | Riskli adımlarda sesli onay | ✅ |
 | Proaktiflik (sabah bröfingi, kalıcı hatırlatıcılar) | ✅ |
+| MCP istemci sistemi (Calendar/GitHub/Spotify vb. genel bağlantı) | ✅ |
 
 ## Gelişmiş TTS
 
@@ -132,10 +133,22 @@ hatırlatıcılar `Documents/Jarvis/Memory/reminders.json`'da tutulur, sunucu
 kapansa/yeniden başlasa bile kaybolmaz. Detaylı tasarım:
 `docs/superpowers/specs/2026-07-23-proaktiflik-design.md`
 
+## MCP İstemci Sistemi
+
+Jarvis, Claude Desktop/Claude Code gibi genel bir MCP (Model Context Protocol)
+host'u. `mcp_servers.example.json`'ı `Documents/Jarvis/mcp_servers.json`'a
+kopyalayıp herhangi bir MCP-uyumlu server'ı (Google Calendar, GitHub, Spotify,
+vb.) ekleyebilirsin — yeni kod yazmaya gerek yok. Güvenlik sınırı: canlı
+sohbette sadece salt-okunur (`readOnlyHint: true`) araçlar doğrudan
+çağrılabilir; yazma/silme gerektiren araçlar sadece arka plan görev ajanı
+üzerinden (`start_task`), mevcut sesli onay mekanizmasıyla çalışır. Detaylı
+tasarım: `docs/superpowers/specs/2026-07-31-mcp-baglanti-design.md`
+
 ## Yeni Yetenek Eklemek
 
 `backend/skills/executor.py` dosyasına yeni bir metod ekleyin,
 ardından `backend/core/brain.py` içindeki `_define_tools()` listesine tanımını ekleyin.
+Harici bir sistem MCP destekliyorsa kod yazmadan `mcp_servers.json`'a eklemek yeterli.
 
 ## Proje Yapısı
 
@@ -149,6 +162,8 @@ Jarvis/
 │   │   ├── memory_digest.py     # Arka plan konuşma özetleme
 │   │   ├── reminders.py         # Kalıcı hatırlatıcı deposu (ReminderStore)
 │   │   ├── briefing.py          # Sabah bröfingi üretimi
+│   │   ├── agent.py             # Arka plan görev ajanı (TaskAgent)
+│   │   ├── mcp_client.py        # MCP server keşif + araç kayıt (McpToolRegistry)
 │   │   ├── stt.py               # Whisper STT
 │   │   └── tts.py               # Ses sentezi
 │   ├── skills/
@@ -167,7 +182,8 @@ Jarvis/
 │   ├── setup.bat
 │   ├── start_server.bat
 │   └── start_pc_client.bat
-└── .env.example
+├── .env.example
+└── mcp_servers.example.json
 ```
 
 ## Lisans
