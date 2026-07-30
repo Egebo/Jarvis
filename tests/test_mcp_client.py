@@ -55,6 +55,21 @@ async def test_connect_all_corrupt_json_leaves_tools_empty(tmp_path):
     assert registry.all_declarations() == []
 
 
+async def test_connect_all_non_object_top_level_json_leaves_tools_empty(tmp_path):
+    path = tmp_path / "mcp_servers.json"
+    path.write_text(json.dumps(["bu bir liste, obje değil"]), encoding="utf-8")
+    registry = McpToolRegistry()
+    await registry.connect_all(path)  # AttributeError sızmamalı
+    assert registry.all_declarations() == []
+
+
+async def test_connect_all_mcpservers_not_object_leaves_tools_empty(tmp_path):
+    config_path = _write_config(tmp_path, ["yanlış tip"])
+    registry = McpToolRegistry()
+    await registry.connect_all(config_path)
+    assert registry.all_declarations() == []
+
+
 async def test_connect_all_registers_tools_with_server_prefix(tmp_path):
     config_path = _write_config(tmp_path, {
         "github": {"command": "npx", "args": ["-y", "@github/mcp-server"]},

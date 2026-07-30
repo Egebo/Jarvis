@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@github/mcp-server"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}
+    },
+    "calendar": {
+      "command": "npx",
+      "args": ["-y", "@cocal/google-calendar-mcp"],
+      "env": {"GOOGLE_OAUTH_CREDENTIALS": "C:\\Users\\KULLANICI\\Documents\\Jarvis\\mcp-auth\\gcp-oauth.keys.json"}
+    },
+    "spotify": {
+      "command": "npx",
+      "args": ["-y", "@tbrgeek/spotify-mcp-server"],
+      "env": {"SPOTIFY_CLIENT_ID": "...", "SPOTIFY_CLIENT_SECRET": "..."}
+    }
+  }
+}

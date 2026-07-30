@@ -32,7 +32,12 @@ class McpToolRegistry:
             log.warning(f"MCP config okunamadı: {e}")
             return
 
-        for server_id, server_cfg in config.get("mcpServers", {}).items():
+        servers = config.get("mcpServers", {}) if isinstance(config, dict) else {}
+        if not isinstance(servers, dict):
+            log.warning("MCP config'te 'mcpServers' bir obje olmalı, atlanıyor")
+            servers = {}
+
+        for server_id, server_cfg in servers.items():
             try:
                 session = await connect(server_id, server_cfg, self._exit_stack)
                 await self._register_tools(server_id, session)
