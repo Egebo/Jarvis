@@ -210,14 +210,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             # ── Sesli giriş ──────────────────────────────────────────────────
             if msg_type == "audio":
                 audio_bytes = base64.b64decode(msg["data"])
-                await manager.send(client_id, {"type": "status", "data": "transcribing"})
+                # Durum TÜM client'lara yayınlanır - web arayüzünün kendi
+                # mikrofonu kapalıyken bile PC client'ın ne yaptığını canlı
+                # görebilmesi için (Egemen'in isteği, 31 Tem 2026: iki
+                # mikrofonu senkronlamak yerine, durumu görünür kılmak).
+                await manager.broadcast({"type": "status", "data": "transcribing"})
 
                 t_stt_start = time.time()
                 transcript = await stt.transcribe_bytes(audio_bytes)
                 log.info(f"📝 [{client_id}] '{transcript}' (STT: {time.time() - t_stt_start:.2f}sn)")
 
                 if not transcript.strip():
-                    await manager.send(client_id, {"type": "status", "data": "idle"})
+                    await manager.broadcast({"type": "status", "data": "idle"})
                     continue
 
                 tm = app.state.task_manager
@@ -243,7 +247,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     # verir — kullanıcı 'anladı mı anlamadı mı' diye kafası
                     # karışmasın diye (Egemen'in isteği, 22 Tem 2026).
                     await manager.send(client_id, {"type": "ignored", "data": transcript})
-                    await manager.send(client_id, {"type": "status", "data": "idle"})
+                    await manager.broadcast({"type": "status", "data": "idle"})
                     continue
 
                 # Transcript TÜM bağlı client'lara yayınlanır (broadcast) -
@@ -287,7 +291,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 messages_snapshot = brain.memory.get_messages()
                 asyncio.create_task(_save_session_memory(messages_snapshot, app.state.memory_store))
                 brain.reset_memory()
-                await manager.send(client_id, {"type": "status", "data": "reset"})
+                await manager.broadcast({"type": "status", "data": "reset"})
                 log.info(f"🔄 [{client_id}] Hafıza sıfırlandı")
 
     except WebSocketDisconnect:
@@ -364,7 +368,7 @@ async def _speak_short(client_id: str, text: str):
     audio_bytes = await tts.synthesize(text)
     await manager.send(client_id, {"type": "audio",
                                    "data": base64.b64encode(audio_bytes).decode()})
-    await manager.send(client_id, {"type": "status", "data": "idle"})
+    await manager.broadcast({"type": "status", "data": "idle"})
 
 
 async def _process_message(
@@ -375,7 +379,10 @@ async def _process_message(
     executor: SkillExecutor
 ):
     """Metni işle, yanıt üret, sese çevir, gönder."""
-    await manager.send(client_id, {"type": "status", "data": "thinking"})
+    # Durum (thinking/speaking/idle) tüm client'lara yayınlanır - web'in
+    # kendi mikrofonu kapalıyken bile PC client'ın canlı durumunu görebilmesi
+    # için (Egemen'in isteği, 31 Tem 2026).
+    await manager.broadcast({"type": "status", "data": "thinking"})
 
     try:
         # Gemini'den yanıt al
@@ -392,7 +399,7 @@ async def _process_message(
         # ise aşağıda SADECE bu isteği başlatan client'a gönderilir - aynı
         # odada iki kere çalmasın diye (Egemen'in isteği, 31 Tem 2026).
         await manager.broadcast({"type": "response", "data": response})
-        await manager.send(client_id, {"type": "status", "data": "speaking"})
+        await manager.broadcast({"type": "status", "data": "speaking"})
 
         # Yanıt TEK PARÇA seslendirilir - cümle cümle ayrı ayrı sentezlemek
         # (önceki hali) her cümleyi bağlamsız/izole ürettiği için doğal
@@ -411,7 +418,7 @@ async def _process_message(
         log.error(f"İşleme hatası: {e}", exc_info=True)
         await manager.send(client_id, {"type": "error", "data": f"Bir hata oluştu: {e}"})
     finally:
-        await manager.send(client_id, {"type": "status", "data": "idle"})
+        await manager.broadcast({"type": "status", "data": "idle"})
 
 
 # ─── HTTP Endpoints ──────────────────────────────────────────────────────────

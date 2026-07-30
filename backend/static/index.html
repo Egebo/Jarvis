@@ -267,7 +267,11 @@
   var followupUntilClient = 0;
 
   function idleLabel() {
-    if (!continuousActive) return { text: '😴 UYKUDA — TIKLA UYANDIR', color: '#00BFFF' };
+    // Web'in kendi mikrofonu kapalı olabilir ama bu Jarvis'in hiçbir yerde
+    // dinlemediği anlamına gelmez (ör. PC client dinliyor olabilir) - metin
+    // buna göre "uyandır" değil "sadece izliyor" desin (Egemen'in isteği,
+    // 31 Tem 2026: iki mikrofonu ayrı tutup durumu yine de görebilmek).
+    if (!continuousActive) return { text: '🎧 SADECE İZLİYOR — mikrofon kapalı', color: '#00BFFF' };
     if (calibrating) return { text: '🎚 KALİBRE EDİLİYOR...', color: '#FFD700' };
     if (micMuted) return { text: '🔇 SESSİZE ALINDI', color: '#FFD700' };
     if (Date.now() < followupUntilClient) {
