@@ -61,10 +61,13 @@ GEMINI_TTS_STYLE = os.getenv(
 )
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "tr-TR-AhmetNeural")  # ücretsiz nöral Türkçe ses
 EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+15%")     # Edge konuşma hızı ("+0%" = normal)
-# Tüm motorlardan çıkan sesi (Gemini dahil) üretimden sonra hızlandırır —
-# Gemini TTS'te motor bazlı hız parametresi yok, prompt'a güvenmek yerine
-# ffmpeh atempo ile garantili hızlandırma (1.0 = değişiklik yok)
-TTS_SPEED = float(os.getenv("TTS_SPEED", "1.3"))
+# Üretimden sonra ffmpeg atempo ile ek hızlandırma - SADECE motorun kendi hız
+# parametresi olmadığında (Gemini TTS) anlamlı; Edge (EDGE_TTS_RATE) ve
+# pyttsx3'ün (TTS_RATE) zaten kendi hız kontrolü var, ikisi üst üste binince
+# konuşma anormal hızlı/bozuk çıkıyordu (varsayılan edge+1.3 ~%50 hızlı,
+# Egemen'in "sesi kötü" şikayeti, 31 Tem 2026). Varsayılan artık 1.0
+# (değişiklik yok); sadece Gemini TTS kullanılıyorsa .env'de yükseltilebilir.
+TTS_SPEED = float(os.getenv("TTS_SPEED", "1.0"))
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam voice
 TTS_RATE = int(os.getenv("TTS_RATE", "175"))           # Konuşma hızı (pyttsx3)
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "0.9"))
