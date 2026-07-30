@@ -19,6 +19,20 @@ from backend.config import (TTS_ENGINE, TTS_RATE, TTS_VOLUME, EDGE_TTS_VOICE,
                               GEMINI_TTS_STYLE,
                               ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID)
 
+# Yanıtın algılanan diline göre Edge TTS sesi - sabit tek dil (Türkçe)
+# sesiyle başka dilleri okumak telaffuzu bozuyordu. langdetect'in
+# döndürdüğü ISO 639-1 koduna göre eşleniyor; haritada olmayan diller
+# EDGE_TTS_VOICE'a (varsayılan Türkçe) düşer.
+EDGE_VOICE_BY_LANG = {
+    "en": "en-US-GuyNeural",
+    "es": "es-ES-AlvaroNeural",
+    "de": "de-DE-ConradNeural",
+    "fr": "fr-FR-HenriNeural",
+    "it": "it-IT-DiegoNeural",
+    "pt": "pt-PT-DuarteNeural",
+    "ru": "ru-RU-DmitryNeural",
+}
+
 
 class TextToSpeech:
     def __init__(self):
@@ -130,11 +144,25 @@ class TextToSpeech:
             wf.writeframes(pcm)
         return buf.getvalue()
 
-    async def _edge(self, text: str) -> bytes:
-        """Edge TTS ile nöral Türkçe ses üretir (MP3 → WAV çevrilir)."""
-        import edge_tts
+    @staticmethod
+    def _voice_for_text(text: str) -> str:
+        """Metnin dilini algılar, haritadaki bir sese eşler; algılama
+        başarısız olursa veya dil haritada yoksa varsayılan (Türkçe)."""
+        try:
+            from langdetect import detect
+            lang = detect(text)
+        except Exception:
+            return EDGE_TTS_VOICE
+        return EDGE_VOICE_BY_LANG.get(lang, EDGE_TTS_VOICE)
 
-        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=EDGE_TTS_RATE)
+    async def _edge(self, text: str) -> bytes:
+        """Edge TTS ile nöral ses üretir (MP3 → WAV çevrilir). Yanıtın dili
+        algılanıp o dile uygun ses seçilir - sabit Türkçe sesle İngilizce/
+        İspanyolca vb. okumak telaffuzu berbat ediyordu (Egemen'in şikayeti,
+        31 Tem 2026)."""
+        import edge_tts
+        voice = self._voice_for_text(text)
+        communicate = edge_tts.Communicate(text, voice, rate=EDGE_TTS_RATE)
         mp3_data = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":

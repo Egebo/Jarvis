@@ -212,8 +212,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 audio_bytes = base64.b64decode(msg["data"])
                 await manager.send(client_id, {"type": "status", "data": "transcribing"})
 
+                t_stt_start = time.time()
                 transcript = await stt.transcribe_bytes(audio_bytes)
-                log.info(f"📝 [{client_id}] '{transcript}'")
+                log.info(f"📝 [{client_id}] '{transcript}' (STT: {time.time() - t_stt_start:.2f}sn)")
 
                 if not transcript.strip():
                     await manager.send(client_id, {"type": "status", "data": "idle"})
@@ -378,12 +379,14 @@ async def _process_message(
 
     try:
         # Gemini'den yanıt al
+        t0 = time.time()
         response = await brain.think(
             text,
             tool_executor=executor.execute
         )
+        t_think = time.time() - t0
 
-        log.info(f"🤖 [{client_id}] → '{response[:80]}...'")
+        log.info(f"🤖 [{client_id}] → '{response[:80]}...' (Gemini: {t_think:.2f}sn)")
 
         # Yanıt metni TÜM client'lara yayınlanır (paylaşılan konuşma); ses
         # ise aşağıda SADECE bu isteği başlatan client'a gönderilir - aynı
@@ -397,9 +400,12 @@ async def _process_message(
         # (Egemen'in şikayeti, 31 Tem 2026). SYSTEM_PROMPT zaten yanıtları
         # 1-2 kısa cümleyle sınırladığından cümle-cümle akışın gecikme
         # kazancı da pratikte çok düşüktü.
+        t1 = time.time()
         audio_bytes = await tts.synthesize(response)
+        t_tts = time.time() - t1
         audio_b64 = base64.b64encode(audio_bytes).decode()
         await manager.send(client_id, {"type": "audio", "data": audio_b64})
+        log.info(f"⏱️ [{client_id}] toplam: {t_think + t_tts:.2f}sn (Gemini: {t_think:.2f}, TTS: {t_tts:.2f})")
 
     except Exception as e:
         log.error(f"İşleme hatası: {e}", exc_info=True)
