@@ -21,6 +21,7 @@ class SkillExecutor:
         self.task_manager = None   # server.py lifespan'de set edilir
         self.memory_store = None   # server.py lifespan'de set edilir
         self.reminder_store = None   # server.py lifespan'de set edilir
+        self.mcp_registry = None   # server.py lifespan'de set edilir
 
     async def execute(self, tool_name: str, tool_input: Dict) -> str:
         handlers = {
@@ -48,13 +49,27 @@ class SkillExecutor:
         }
 
         handler = handlers.get(tool_name)
-        if not handler:
-            return f"Bilinmeyen araç: {tool_name}"
+        if handler:
+            try:
+                return await handler(**tool_input)
+            except Exception as e:
+                return f"Araç hatası ({tool_name}): {str(e)}"
 
-        try:
-            return await handler(**tool_input)
-        except Exception as e:
-            return f"Araç hatası ({tool_name}): {str(e)}"
+        if self.mcp_registry and self.mcp_registry.has(tool_name):
+            # Savunma katmanı: canlı sohbetin tool listesi zaten sadece
+            # salt-okunur MCP araçlarını içeriyor (brain.py), ama bu kontrol
+            # burada da tekrarlanıyor ki tool listesindeki ileride olası bir
+            # hata (ör. yanlışlıkla all_declarations() kullanılması) tek
+            # başına yeterli olmasın - iki bağımsız güvenlik katmanı olsun.
+            if not self.mcp_registry.is_read_only(tool_name):
+                return (f"'{tool_name}' değişiklik gerektiriyor, bunu doğrudan "
+                        f"yapamam - görev ajanını (start_task) kullan, o onay ister.")
+            try:
+                return await self.mcp_registry.call(tool_name, tool_input)
+            except Exception as e:
+                return f"Araç hatası ({tool_name}): {str(e)}"
+
+        return f"Bilinmeyen araç: {tool_name}"
 
     # ─── Görev Ajanı köprüsü ─────────────────────────────────────────────────
     async def start_task(self, description: str) -> str:
@@ -66,7 +81,7 @@ class SkillExecutor:
 
         def runner_factory(tm):
             agent = TaskAgent(description, FileTools(WORKSPACE_DIR), executor=self,
-                              approval_cb=tm.request_approval)
+                              approval_cb=tm.request_approval, mcp_registry=self.mcp_registry)
             return agent.run()
 
         return self.task_manager.start(description, runner_factory)

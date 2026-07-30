@@ -108,3 +108,6 @@ AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "25"))
 
 # ─── Kalıcı Hafıza ──────────────────────────────────────────────────────────
 MEMORY_DIR = Path(os.getenv("JARVIS_MEMORY_DIR", str(JARVIS_DATA_DIR / "Memory")))
+
+# ─── MCP (Model Context Protocol) ────────────────────────────────────────────
+MCP_CONFIG_PATH = Path(os.getenv("JARVIS_MCP_CONFIG", str(JARVIS_DATA_DIR / "mcp_servers.json")))

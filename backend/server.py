@@ -35,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.config import SERVER_HOST, SERVER_PORT, FOLLOWUP_WINDOW, MEMORY_DIR
+from backend.config import SERVER_HOST, SERVER_PORT, FOLLOWUP_WINDOW, MEMORY_DIR, MCP_CONFIG_PATH
 from backend.core.brain import JarvisBrain
 from backend.core.stt import SpeechToText
 from backend.core.tts import TextToSpeech
@@ -114,9 +114,15 @@ async def lifespan(app: FastAPI):
 
     app.state.reminder_scheduler_task = asyncio.create_task(_reminder_scheduler())
 
+    from backend.core.mcp_client import McpToolRegistry
+    app.state.mcp_registry = McpToolRegistry()
+    await app.state.mcp_registry.connect_all(MCP_CONFIG_PATH)
+    app.state.executor.mcp_registry = app.state.mcp_registry
+
     log.info("✅ Jarvis hazır! Bağlantı bekleniyor...")
     yield
     app.state.reminder_scheduler_task.cancel()
+    await app.state.mcp_registry.close()
     log.info("👋 Jarvis kapatılıyor...")
 
 
@@ -174,7 +180,7 @@ followup_until: dict[str, float] = {}
 
 def get_brain(client_id: str) -> JarvisBrain:
     if client_id not in sessions:
-        sessions[client_id] = JarvisBrain()
+        sessions[client_id] = JarvisBrain(mcp_registry=app.state.mcp_registry)
     else:
         sessions[client_id].system_prompt = sessions[client_id]._build_system_prompt()
     return sessions[client_id]

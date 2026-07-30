@@ -11,9 +11,10 @@ from backend.core.memory import ConversationMemory
 
 
 class JarvisBrain:
-    def __init__(self):
+    def __init__(self, mcp_registry=None):
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.memory = ConversationMemory(max_turns=20)
+        self.mcp_registry = mcp_registry
         self.tools = self._define_tools()
         self.system_prompt = self._build_system_prompt()
 
@@ -235,6 +236,8 @@ class JarvisBrain:
                 }
             ),
         ]
+        if self.mcp_registry:
+            declarations += self.mcp_registry.read_only_declarations()
         return [types.Tool(function_declarations=declarations)]
 
     def _build_contents(self) -> list:
