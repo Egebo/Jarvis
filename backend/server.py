@@ -23,7 +23,6 @@ import asyncio
 import base64
 import json
 import logging
-import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -73,11 +72,9 @@ async def lifespan(app: FastAPI):
         }.get(event_type)
         if speech:
             await manager.broadcast({"type": "response", "data": speech})
-            sentences = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", speech) if s.strip()] or [speech]
-            for sentence in sentences:
-                audio_bytes = await app.state.tts.synthesize(sentence)
-                await manager.broadcast({"type": "audio",
-                                         "data": base64.b64encode(audio_bytes).decode()})
+            audio_bytes = await app.state.tts.synthesize(speech)
+            await manager.broadcast({"type": "audio",
+                                     "data": base64.b64encode(audio_bytes).decode()})
 
     app.state.task_manager = TaskManager(event_cb=task_event)
     app.state.executor.task_manager = app.state.task_manager
@@ -172,25 +169,32 @@ manager = ConnectionManager()
 
 
 # ─── Oturum Yönetimi ────────────────────────────────────────────────────────
-sessions: dict[str, JarvisBrain] = {}
+# Tek kullanıcılı kişisel asistan - PC client ve web arayüzü (kaç sekme
+# açılırsa açılsın) AYNI konuşmayı/hafızayı paylaşır (Egemen'in isteği,
+# 31 Tem 2026: "hangisinden yazarsan yaz, aynı hafıza"). client_id başına
+# ayrı brain YOK artık; tek paylaşılan brain var, kim bağlanırsa bağlansın
+# aynısı döner.
+_shared_brain: JarvisBrain | None = None
 # Yanıttan sonraki kısa pencerede wake word'süz devam edilebilsin diye
 # (client_id -> bu zamana kadar geçerli). Sadece sesli girişte kullanılır;
-# yazılı mesajlar zaten niyet bildirdiği için hiç gate'lenmez.
+# yazılı mesajlar zaten niyet bildirdiği için hiç gate'lenmez. Bu PC
+# client'a özgü kalıyor (paylaşılan hafızadan bağımsız).
 followup_until: dict[str, float] = {}
 
-def get_brain(client_id: str) -> JarvisBrain:
-    if client_id not in sessions:
-        sessions[client_id] = JarvisBrain(mcp_registry=app.state.mcp_registry)
+def get_brain() -> JarvisBrain:
+    global _shared_brain
+    if _shared_brain is None:
+        _shared_brain = JarvisBrain(mcp_registry=app.state.mcp_registry)
     else:
-        sessions[client_id].system_prompt = sessions[client_id]._build_system_prompt()
-    return sessions[client_id]
+        _shared_brain.system_prompt = _shared_brain._build_system_prompt()
+    return _shared_brain
 
 
 # ─── WebSocket Endpoint ──────────────────────────────────────────────────────
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await manager.connect(client_id, websocket)
-    brain = get_brain(client_id)
+    brain = get_brain()
     if client_id.startswith("pc-"):
         asyncio.create_task(_maybe_send_briefing(client_id))
     stt: SpeechToText = app.state.stt
@@ -241,7 +245,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     await manager.send(client_id, {"type": "status", "data": "idle"})
                     continue
 
-                await manager.send(client_id, {"type": "transcript", "data": transcript})
+                # Transcript TÜM bağlı client'lara yayınlanır (broadcast) -
+                # PC'yle sesli konuştuğun şey web arayüzünde de görünsün diye
+                # (paylaşılan tek konuşma, Egemen'in isteği 31 Tem 2026).
+                await manager.broadcast({"type": "transcript", "data": transcript})
                 await _process_message(client_id, transcript, brain, tts, executor)
                 followup_until[client_id] = time.time() + FOLLOWUP_WINDOW
                 # İstemciye takip penceresinin açıldığını bildir — bu olmadan
@@ -264,6 +271,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             await _speak_short(client_id, ack)
                             continue
 
+                    # Yazan client zaten kendi yazdığını görüyor ama diğer
+                    # bağlı client'lar (ör. PC client konuşurken açık bir
+                    # başka web sekmesi) görmüyor - paylaşılan konuşmanın
+                    # parçası olarak yayınla.
+                    await manager.broadcast({"type": "transcript", "data": text})
                     await _process_message(client_id, text, brain, tts, executor)
 
             # ── Hafıza sıfırlama ─────────────────────────────────────────────
@@ -279,9 +291,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
     except WebSocketDisconnect:
         manager.disconnect(client_id)
-        messages_snapshot = brain.memory.get_messages()
-        asyncio.create_task(_save_session_memory(messages_snapshot, app.state.memory_store))
-        brain.reset_memory()
+        # Hafıza artık PAYLAŞILAN - bir client (ör. web sekmesi) ayrılırken
+        # başka client'lar (ör. PC client) hâlâ bağlıysa konuşmayı bitirmiş
+        # sayılamayız, sıfırlarsak onların da hafızasını silmiş oluruz.
+        # Sadece SON bağlı client ayrılınca özetleyip sıfırla.
+        if not manager.active:
+            messages_snapshot = brain.memory.get_messages()
+            asyncio.create_task(_save_session_memory(messages_snapshot, app.state.memory_store))
+            brain.reset_memory()
     except Exception as e:
         log.error(f"❌ [{client_id}] Hata: {e}", exc_info=True)
         await manager.send(client_id, {"type": "error", "data": str(e)})
@@ -337,8 +354,11 @@ def _recent_digests_text(store) -> str:
 
 
 async def _speak_short(client_id: str, text: str):
-    """Kısa onay yanıtı: metin + tek parça ses."""
-    await manager.send(client_id, {"type": "response", "data": text})
+    """Kısa onay yanıtı: metin tüm client'lara yayınlanır (paylaşılan
+    konuşmanın parçası), ses SADECE hedef client'a gider - aynı odada
+    hem PC hoparlörü hem başka bir tarayıcı sekmesi aynı anda çalıp
+    iki kere duyulmasın diye."""
+    await manager.broadcast({"type": "response", "data": text})
     tts: TextToSpeech = app.state.tts
     audio_bytes = await tts.synthesize(text)
     await manager.send(client_id, {"type": "audio",
@@ -365,19 +385,21 @@ async def _process_message(
 
         log.info(f"🤖 [{client_id}] → '{response[:80]}...'")
 
-        # Yanıtı gönder
-        await manager.send(client_id, {"type": "response", "data": response})
+        # Yanıt metni TÜM client'lara yayınlanır (paylaşılan konuşma); ses
+        # ise aşağıda SADECE bu isteği başlatan client'a gönderilir - aynı
+        # odada iki kere çalmasın diye (Egemen'in isteği, 31 Tem 2026).
+        await manager.broadcast({"type": "response", "data": response})
         await manager.send(client_id, {"type": "status", "data": "speaking"})
 
-        # Cümle cümle seslendir: ilk cümle hazır olur olmaz çalmaya başlar,
-        # kalanlar o çalarken sentezlenir (bekleme hissini azaltır)
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", response) if s.strip()]
-        if not sentences:
-            sentences = [response]
-        for sentence in sentences:
-            audio_bytes = await tts.synthesize(sentence)
-            audio_b64 = base64.b64encode(audio_bytes).decode()
-            await manager.send(client_id, {"type": "audio", "data": audio_b64})
+        # Yanıt TEK PARÇA seslendirilir - cümle cümle ayrı ayrı sentezlemek
+        # (önceki hali) her cümleyi bağlamsız/izole ürettiği için doğal
+        # tonlamayı bozup robotik/madde-madde-okuyor hissi veriyordu
+        # (Egemen'in şikayeti, 31 Tem 2026). SYSTEM_PROMPT zaten yanıtları
+        # 1-2 kısa cümleyle sınırladığından cümle-cümle akışın gecikme
+        # kazancı da pratikte çok düşüktü.
+        audio_bytes = await tts.synthesize(response)
+        audio_b64 = base64.b64encode(audio_bytes).decode()
+        await manager.send(client_id, {"type": "audio", "data": audio_b64})
 
     except Exception as e:
         log.error(f"İşleme hatası: {e}", exc_info=True)
@@ -398,7 +420,8 @@ async def api_status():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "active_sessions": len(sessions)}
+    return {"status": "ok", "active_connections": len(manager.active),
+            "brain_active": _shared_brain is not None}
 
 
 # Web arayüzünün statik dosyaları (CSS/JS ileride ayrılırsa buradan servis edilir)

@@ -692,7 +692,9 @@
     e.preventDefault();
     var text = textInput.value.trim();
     if (!text) return;
-    addBubble('user', text);
+    // Kabarcık burada değil, sunucudan gelen 'transcript' yayınıyla eklenir -
+    // artık sunucu bunu TÜM bağlı client'lara (PC dahil) yayınlıyor, tek
+    // kaynaktan göstermek çift kabarcık oluşmasını önlüyor.
     send({ type: 'text', data: text });
     textInput.value = '';
   });
