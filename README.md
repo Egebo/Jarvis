@@ -49,6 +49,14 @@ scripts\start_pc_client.bat
 # "Jarvis" dediğinizde aktifleşir
 ```
 
+### 4a. Sistem Tepsisinden Başlatma (Windows, önerilen)
+```bash
+scripts\start_tray.bat
+```
+Sunucu + PC client'ı görünür pencere açmadan arka planda başlatır, sistem
+tepsisine (saat yanı) bir ikon ekler. İkondan web arayüzünü açabilir veya
+her şeyi tek tıkla durdurabilirsin. Loglar `Documents/Jarvis/logs/` altında.
+
 ### 4b. Metin Modu (Test)
 ```bash
 scripts\start_text_mode.bat
