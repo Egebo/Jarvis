@@ -1,9 +1,13 @@
 {
   "mcpServers": {
     "github": {
-      "command": "npx",
-      "args": ["-y", "@github/mcp-server"],
-      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}
+      "command": "docker",
+      "args": ["run", "-i", "--rm",
+               "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+               "-e", "GITHUB_TOOLSETS=repos,issues,pull_requests",
+               "ghcr.io/github/github-mcp-server",
+               "stdio", "--read-only"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "github_pat_..."}
     },
     "calendar": {
       "command": "npx",
